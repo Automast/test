@@ -1,3 +1,4 @@
+// components/layouts/DashLayout.tsx
 'use client';
 
 import { ReactNode, useEffect, useRef, useState } from 'react';
@@ -5,7 +6,7 @@ import Link from 'next/link';
 import { Bell, ChevronDown } from 'lucide-react';
 import { SidebarMerchant } from '../widgets';
 import { useApiRequest } from '@/hooks';
-import { API_ENDPOINTS } from '@/consts/api';
+import { API_ENDPOINTS } from '@/consts/api'; // Assuming API_ENDPOINTS.AUTH.ME exists
 import { Notification } from '@/types';
 import { mockNotiData } from '@/mock';
 import Image from 'next/image';
@@ -37,19 +38,19 @@ const DashLayout: React.FC<{ children: ReactNode; titleArea: ReactNode; tools?: 
     if (isClient) {
       fetchUserProfile();
     }
-  }, [isClient]);
+  }, [isClient]); // Added router to dependencies
 
   const fetchUserProfile = async () => {
     if (typeof window === 'undefined') return;
-    
+    setLoading(true); // Ensure loading is true at the start
+
     try {
       const token = localStorage.getItem('jwt_token');
       if (!token) {
-        router.push('/signin');
+        router.push('/signin'); // Redirect to signin if no token
         return;
       }
 
-      // Call the auth/me endpoint with correct URL
       const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
       const response = await fetch(`${baseUrl}${API_ENDPOINTS.AUTH.ME}`, {
         headers: {
@@ -58,23 +59,40 @@ const DashLayout: React.FC<{ children: ReactNode; titleArea: ReactNode; tools?: 
         }
       });
 
-      if (response.status === 401) {
+      // If response is not OK (e.g., 401, 403, 500)
+      if (!response.ok) {
         localStorage.removeItem('jwt_token');
         localStorage.removeItem('user_data');
-        router.push('/signin');
+        router.push('/signin'); // Redirect to signin on any fetch error or non-successful auth
         return;
       }
 
-      if (response.ok) {
-        const result = await response.json();
-        if (result.success) {
-          // Extract user and merchant from the response
-          setUserInfo(result.data.user);
-          setMerchantInfo(result.data.merchant);
-        }
+      const result = await response.json();
+
+      // If API call was successful but indicates an issue (e.g., result.success is false)
+      if (!result.success) {
+        localStorage.removeItem('jwt_token');
+        localStorage.removeItem('user_data');
+        router.push('/signin'); // Treat as an authentication failure
+        return;
       }
+      
+      // Successfully fetched user data
+      setUserInfo(result.data.user);
+      setMerchantInfo(result.data.merchant);
+
+      // CRITICAL CHECK: If user is in merchant area but onboarding is NOT complete, redirect to onboarding
+      if (!result.data.user.onboardingComplete) {
+          router.push('/onboarding/business'); // Or the correct current onboarding step
+          // setLoading(false) will be called in finally, no need to return setLoading here
+          return;
+      }
+
     } catch (error) {
       console.error('Error fetching user profile:', error);
+      localStorage.removeItem('jwt_token');
+      localStorage.removeItem('user_data');
+      router.push('/signin'); // Redirect to signin on any exception during fetch
     } finally {
       setLoading(false);
     }
@@ -84,13 +102,14 @@ const DashLayout: React.FC<{ children: ReactNode; titleArea: ReactNode; tools?: 
     if (typeof window === 'undefined') return;
     
     try {
-      // Just clear local storage and redirect
       localStorage.removeItem('jwt_token');
       localStorage.removeItem('user_data');
+      // Clear cookie for middleware if it exists
+      document.cookie = 'token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;';
       router.push('/signin');
     } catch (error) {
       console.error('Error during logout:', error);
-      router.push('/signin');
+      router.push('/signin'); // Fallback redirect
     }
   };
 
@@ -103,21 +122,21 @@ const DashLayout: React.FC<{ children: ReactNode; titleArea: ReactNode; tools?: 
     return businessName.substring(0, 2).toUpperCase();
   };
 
+  // Notification fetching logic (remains the same)
   const {
     response: notiResponse,
     error: notiError,
-    loading: notiLoading,
+    loading: notiLoading, // This is a separate loading state for notifications
     sendRequest: sendNotiRequest,
   } = useApiRequest({
-    endpoint: '/notifications',
+    endpoint: '/notifications', // Assuming this is a defined constant or full path
     headers: {
       Accept: 'application/json',
-      Authorization: isClient ? `Bearer ${localStorage.getItem('jwt_token') || ''}` : '',
+      // Authorization header will be added by useApiRequest if auth=true (default)
     },
     method: 'GET',
   });
 
-  // Close dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
@@ -132,14 +151,14 @@ const DashLayout: React.FC<{ children: ReactNode; titleArea: ReactNode; tools?: 
   }, []);
 
   useEffect(() => {
-    if (isClient) {
+    if (isClient && userInfo) { // Fetch notifications only after user profile is loaded
       sendNotiRequest();
     }
-  }, [isClient]);
+  }, [isClient, userInfo, sendNotiRequest]); // sendNotiRequest added to dependency array
 
   useEffect(() => {
     if (notiError) {
-      setNotiList(mockNotiData);
+      setNotiList(mockNotiData); // Fallback to mock data on error
     }
   }, [notiError]);
 
@@ -149,30 +168,45 @@ const DashLayout: React.FC<{ children: ReactNode; titleArea: ReactNode; tools?: 
     }
   }, [notiResponse]);
 
-  if (!isClient || loading) {
+  // Render loading state for the whole layout until user profile is fetched
+  if (loading) {
     return (
       <div className="flex min-h-screen bg-gray-100 text-gray-900">
-        <SidebarMerchant />
+        <SidebarMerchant /> {/* Render sidebar even during loading for structure */}
         <main className="flex-1 p-4 md:p-8 transition-all space-y-6 md:ml-64 transform duration-300 ease-in-out max-w-full md:max-w-[calc(100%-16rem)]">
           <div className="flex items-center justify-center h-64">
-            <div className="text-gray-500">Loading...</div>
+            <div className="text-gray-500">Loading dashboard...</div>
+            {/* You can add a spinner here */}
           </div>
         </main>
       </div>
     );
   }
+  
+  // If not loading and userInfo is still null (e.g. redirect is in progress), render minimal or null
+  if (!userInfo) {
+      return (
+        <div className="flex min-h-screen bg-gray-100 text-gray-900">
+           <SidebarMerchant />
+           <main className="flex-1 p-4 md:p-8 md:ml-64">
+             {/* Optional: A more specific loading/redirecting message */}
+             <div className="flex items-center justify-center h-64">
+                <div className="text-gray-500">Loading user data or redirecting...</div>
+             </div>
+           </main>
+        </div>
+      );
+  }
+
 
   return (
     <div className="flex min-h-screen bg-gray-100 text-gray-900">
-      {/* Sidebar */}
       <SidebarMerchant />
-      {/* Main Content */}
       <main className="flex-1 p-4 md:p-8 transition-all space-y-6 md:ml-64 transform duration-300 ease-in-out max-w-full md:max-w-[calc(100%-16rem)]">
         <div className="flex justify-between items-center ml-12 md:ml-0 h-10">
           <div>{titleArea}</div>
           <div className="flex items-center gap-2 md:gap-4 transition">
             {tools}
-            {/* Notifications */}
             <div className="relative" ref={ref}>
               <button
                 className="relative block rounded-full border-gray-300 border-1 p-1 cursor-pointer hover:bg-white transition"
@@ -194,7 +228,7 @@ const DashLayout: React.FC<{ children: ReactNode; titleArea: ReactNode; tools?: 
                           <div>
                             <p className="font-medium text-sm truncate">{noti.title}</p>
                             <p className="text-gray-400 text-xs">
-                              {noti.date.toLocaleString('en-US', {
+                              {new Date(noti.date).toLocaleString('en-US', { // Ensure noti.date is a valid Date object or string
                                 month: 'short',
                                 day: 'numeric',
                                 year: 'numeric',
@@ -211,7 +245,6 @@ const DashLayout: React.FC<{ children: ReactNode; titleArea: ReactNode; tools?: 
                 </div>
               )}
             </div>
-            {/* Profile Dropdown */}
             <div className="relative" ref={profileRef}>
               <button
                 className="flex items-center gap-2 text-sm cursor-pointer"
