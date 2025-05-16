@@ -1,0 +1,1333 @@
+
+// File: components/layouts/DashLayout.tsx
+
+'use client';
+
+import { ReactNode, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
+import { Bell, ChevronDown } from 'lucide-react';
+import { SidebarMerchant } from '../widgets';
+import { useApiRequest } from '@/hooks';
+import { API_ENDPOINTS } from '@/consts/api';
+import { Notification } from '@/types';
+import { mockNotiData } from '@/mock';
+import Image from 'next/image';
+import { useRouter } from 'next/navigation';
+
+const DashLayout: React.FC<{ children: ReactNode; titleArea: ReactNode; tools?: ReactNode }> = ({
+  children,
+  titleArea,
+  tools,
+}) => {
+  const router = useRouter();
+  const [userInfo, setUserInfo] = useState<any>(null);
+  const [merchantInfo, setMerchantInfo] = useState<any>(null);
+  const [notiShow, setNotiShow] = useState(false);
+  const [profileDropdown, setProfileDropdown] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [isClient, setIsClient] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const profileRef = useRef<HTMLDivElement>(null);
+  const [notiList, setNotiList] = useState<Notification[]>([] as Notification[]);
+
+  // Check if we're on the client side
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  // Fetch user profile
+  useEffect(() => {
+    if (isClient) {
+      fetchUserProfile();
+    }
+  }, [isClient]);
+
+  const fetchUserProfile = async () => {
+    if (typeof window === 'undefined') return;
+    
+    try {
+      const token = localStorage.getItem('jwt_token');
+      if (!token) {
+        router.push('/signin');
+        return;
+      }
+
+      // Call the auth/me endpoint with correct URL
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+      const response = await fetch(`${baseUrl}${API_ENDPOINTS.AUTH.ME}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.status === 401) {
+        localStorage.removeItem('jwt_token');
+        localStorage.removeItem('user_data');
+        router.push('/signin');
+        return;
+      }
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success) {
+          // Extract user and merchant from the response
+          setUserInfo(result.data.user);
+          setMerchantInfo(result.data.merchant);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching user profile:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    if (typeof window === 'undefined') return;
+    
+    try {
+      // Just clear local storage and redirect
+      localStorage.removeItem('jwt_token');
+      localStorage.removeItem('user_data');
+      router.push('/signin');
+    } catch (error) {
+      console.error('Error during logout:', error);
+      router.push('/signin');
+    }
+  };
+
+  const getInitials = (businessName: string) => {
+    if (!businessName) return 'B';
+    const words = businessName.split(' ');
+    if (words.length >= 2) {
+      return (words[0].charAt(0) + words[1].charAt(0)).toUpperCase();
+    }
+    return businessName.substring(0, 2).toUpperCase();
+  };
+
+  const {
+    response: notiResponse,
+    error: notiError,
+    loading: notiLoading,
+    sendRequest: sendNotiRequest,
+  } = useApiRequest({
+    endpoint: '/notifications',
+    headers: {
+      Accept: 'application/json',
+      Authorization: isClient ? `Bearer ${localStorage.getItem('jwt_token') || ''}` : '',
+    },
+    method: 'GET',
+  });
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setNotiShow(false);
+      }
+      if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
+        setProfileDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (isClient) {
+      sendNotiRequest();
+    }
+  }, [isClient]);
+
+  useEffect(() => {
+    if (notiError) {
+      setNotiList(mockNotiData);
+    }
+  }, [notiError]);
+
+  useEffect(() => {
+    if (notiResponse) {
+      setNotiList(notiResponse.data);
+    }
+  }, [notiResponse]);
+
+  if (!isClient || loading) {
+    return (
+      <div className="flex min-h-screen bg-gray-100 text-gray-900">
+        <SidebarMerchant />
+        <main className="flex-1 p-4 md:p-8 transition-all space-y-6 md:ml-64 transform duration-300 ease-in-out max-w-full md:max-w-[calc(100%-16rem)]">
+          <div className="flex items-center justify-center h-64">
+            <div className="text-gray-500">Loading...</div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-h-screen bg-gray-100 text-gray-900">
+      {/* Sidebar */}
+      <SidebarMerchant />
+      {/* Main Content */}
+      <main className="flex-1 p-4 md:p-8 transition-all space-y-6 md:ml-64 transform duration-300 ease-in-out max-w-full md:max-w-[calc(100%-16rem)]">
+        <div className="flex justify-between items-center ml-12 md:ml-0 h-10">
+          <div>{titleArea}</div>
+          <div className="flex items-center gap-2 md:gap-4 transition">
+            {tools}
+            {/* Notifications */}
+            <div className="relative" ref={ref}>
+              <button
+                className="relative block rounded-full border-gray-300 border-1 p-1 cursor-pointer hover:bg-white transition"
+                onClick={() => setNotiShow(!notiShow)}
+              >
+                <Bell className="w-5 h-5" />
+                {notiList.length > 0 && (
+                  <span className="absolute top-1 right-[7px] block h-2 w-2 rounded-full bg-red-500" />
+                )}
+              </button>
+              {notiShow && (
+                <div className="absolute right-0 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+                  <div className="font-semibold py-2 px-4 border-b border-b-gray-300">Notifications</div>
+                  <div className="p-4 text-sm text-gray-700">
+                    {notiList.length === 0 && <p>No new notifications</p>}
+                    {notiList.length > 0 &&
+                      notiList.map((noti) => (
+                        <div key={noti.id} className="flex items-center gap-2 mb-2">
+                          <div>
+                            <p className="font-medium text-sm truncate">{noti.title}</p>
+                            <p className="text-gray-400 text-xs">
+                              {noti.date.toLocaleString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric',
+                                hour: 'numeric',
+                                minute: '2-digit',
+                                hour12: true,
+                              })}
+                            </p>
+                            <p className="text-gray-500 text-xs h-8">{noti.content}</p>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            {/* Profile Dropdown */}
+            <div className="relative" ref={profileRef}>
+              <button
+                className="flex items-center gap-2 text-sm cursor-pointer"
+                onClick={() => setProfileDropdown(!profileDropdown)}
+              >
+                <div className="w-8 h-8 rounded-full bg-blue-500 text-white flex items-center justify-center font-medium">
+                  {merchantInfo?.businessName ? getInitials(merchantInfo.businessName) : 'B'}
+                </div>
+                <div className="md:flex hidden">
+                  <p className="font-medium truncate">{merchantInfo?.businessName || 'Business'}</p>
+                </div>
+                <ChevronDown className="w-4 h-4" />
+              </button>
+              {profileDropdown && (
+                <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+                  <div className="py-1">
+                    <Link
+                      href="/merchant/settings?tab=security"
+                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      onClick={() => setProfileDropdown(false)}
+                    >
+                      Profile Settings
+                    </Link>
+                    <button
+                      onClick={() => {
+                        setProfileDropdown(false);
+                        handleLogout();
+                      }}
+                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      Logout
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        {children}
+      </main>
+    </div>
+  );
+};
+
+export default DashLayout;
+
+// File: hooks/useApiRequest.ts
+
+import { useState } from 'react';
+import axios, { AxiosRequestConfig, AxiosResponse } from 'axios';
+
+interface UseApiRequestProps {
+  endpoint: string;
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  data?: any;
+  params?: any;
+  headers?: Record<string, string>;
+  auth?: boolean;
+  immediate?: boolean;
+}
+
+interface UseApiRequestResponse<T extends { message?: string; data?: any; [key: string]: any }> {
+  response: T | null;
+  error: T | null;
+  loading: boolean;
+  sendRequest: (url?: string, formData?: any) => Promise<void>;
+}
+
+export const useApiRequest = <T extends { message?: string; data?: any; [key: string]: any }>({
+  endpoint,
+  method = 'GET',
+  data = null,
+  params = null,
+  headers = { 'Content-Type': 'application/json' },
+  auth = true,
+  immediate = true,
+}: UseApiRequestProps): UseApiRequestResponse<T> => {
+  const [response, setResponse] = useState<T | null>(null);
+  const [error, setError] = useState<T | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+
+  const getToken = () => {
+    if (typeof window === 'undefined') return '';
+    return localStorage.getItem('jwt_token') || '';
+  };
+
+  const sendRequest = async (url = '', formData = {}) => {
+    setLoading(true);
+    setError(null);
+
+    // Get the API URL from environment
+    const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+    
+    // Build the full URL - remove /api/v1 from our base since it's already in env
+    const fullUrl = url ? `${apiBaseUrl}${endpoint}${url}` : `${apiBaseUrl}${endpoint}`;
+
+    // Construct headers, merging provided headers with conditional auth header
+    const requestHeaders = {
+      ...(formData instanceof FormData ? {} : headers), // Don't set Content-Type for FormData
+      ...(auth && { Authorization: `Bearer ${getToken()}` }),
+    };
+
+    const config: AxiosRequestConfig = {
+      url: fullUrl,
+      method,
+      headers: requestHeaders,
+      data: formData instanceof FormData ? formData : { ...data, ...formData },
+      params: {
+        ...params,
+      },
+    };
+
+    try {
+      const res: AxiosResponse<T> = await axios(config);
+      setResponse(res.data);
+    } catch (err: any) {
+      if (axios.isAxiosError(err)) {
+        setError(err.response?.data ?? err);
+      } else {
+        setError({
+          message: err.message ?? 'Something went wrong!',
+        } as T);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return { response, error, loading, sendRequest };
+};
+
+// File: types/index.ts
+
+export * from './transaction';
+export * from './hook';
+export * from './payout';
+export * from './notification';
+export * from './product';
+
+
+
+// File: app/merchant/page.tsx
+
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area, CartesianGrid } from 'recharts';
+import { DashLayout } from '@/components/layouts';
+import { ListFilter } from 'lucide-react';
+import { CircularProgressbar, buildStyles } from 'react-circular-progressbar';
+
+import 'react-circular-progressbar/dist/styles.css';
+import '@/assets/styles/dashboard.css';
+import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
+import Link from 'next/link';
+
+const CustomTooltip: React.FC<{ payload?: Array<{ payload: { value: number | string } }>; label?: string }> = ({
+  payload,
+  label,
+}) => {
+  if (!payload || payload.length === 0) return null;
+
+  const data = payload[0].payload;
+  return (
+    <div style={{ backgroundColor: 'black', color: 'white', padding: '10px', borderRadius: '5px' }}>
+      <p className="text-sm">US$ {data.value}</p>
+      <p className="text-xs">{label}</p>
+    </div>
+  );
+};
+
+const Dashboard = () => {
+  const [period, setPeriod] = useState<number>(0); // 0 = today, 1 = yesterday, 7 = week, etc.
+  const [userData, setUserData] = useState<any>(null);
+  const [merchantData, setMerchantData] = useState<any>(null);
+  const [balances, setBalances] = useState<any>(null);
+  const [orderOverview, setOrderOverview] = useState<any>(null);
+  const [salesData, setSalesData] = useState<any[]>([]);
+  const [orderStatus, setOrderStatus] = useState<any>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [dashboardCurrency, setDashboardCurrency] = useState<string>('USD');
+  const [isClient, setIsClient] = useState(false);
+
+  const formatter = new Intl.NumberFormat('en-US', {
+    style: 'decimal',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+  // Check if we're on the client side
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  // Authentication check
+  useEffect(() => {
+    if (isClient) {
+      if (typeof window !== 'undefined') {
+        const token = localStorage.getItem('jwt_token');
+        if (!token) {
+          window.location.href = '/signin';
+          return;
+        }
+        loadDashboard();
+      }
+    }
+  }, [period, isClient]);
+
+  const loadDashboard = async () => {
+    if (typeof window === 'undefined') return;
+    
+    try {
+      setLoading(true);
+      const token = localStorage.getItem('jwt_token');
+      
+      if (!token) {
+        window.location.href = '/signin';
+        return;
+      }
+
+      // 1. Get user and merchant info using the correct endpoint
+      const meResponse = await fetch('/api/auth/me', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (meResponse.status === 401) {
+        localStorage.removeItem('jwt_token');
+        localStorage.removeItem('user_data');
+        window.location.href = '/signin';
+        return;
+      }
+
+      const meData = await meResponse.json();
+      if (!meData.success) {
+        throw new Error('Failed to load user data');
+      }
+
+      const { user, merchant } = meData.data;
+      setUserData(user);
+      setMerchantData(merchant);
+
+      // Determine dashboard currency based on merchant country
+      const isBrazil = merchant.country === 'BR';
+      const dashCur = isBrazil ? 'BRL' : 'USD';
+      setDashboardCurrency(dashCur);
+
+      // 2. Get date ranges for current and previous periods
+      const rangeNow = getDateRange(period);
+      const rangePrev = getPreviousDateRange(period, rangeNow);
+
+      // 3. Fetch balance and transaction data in parallel
+      const [balanceResponse, txNowResponse, txPrevResponse] = await Promise.all([
+        fetch('/api/finance/balance', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }),
+        fetch(`/api/finance/transactions?fromDate=${encodeURIComponent(rangeNow.from)}&toDate=${encodeURIComponent(rangeNow.to)}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }),
+        fetch(`/api/finance/transactions?fromDate=${encodeURIComponent(rangePrev.from)}&toDate=${encodeURIComponent(rangePrev.to)}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        })
+      ]);
+
+      const balanceData = await balanceResponse.json();
+      const txNowData = await txNowResponse.json();
+      const txPrevData = await txPrevResponse.json();
+
+      // Set balances
+      if (balanceData.success) {
+        setBalances(balanceData.data.balances);
+      }
+
+      // Process transaction data for metrics
+      const txNow = txNowData.success ? txNowData.data.transactions : [];
+      const txPrev = txPrevData.success ? txPrevData.data.transactions : [];
+      
+      const statsNow = calcStats(txNow, dashCur);
+      const statsPrev = calcStats(txPrev, dashCur);
+
+      setOrderOverview({
+        gross: {
+          amount: statsNow.gross,
+          delta: percentChange(statsNow.gross, statsPrev.gross)
+        },
+        paidOrder: {
+          amount: statsNow.paid,
+          delta: percentChange(statsNow.paid, statsPrev.paid)
+        },
+        averageSucceedOrder: {
+          amount: statsNow.acceptance,
+          delta: percentChange(statsNow.acceptance, statsPrev.acceptance)
+        }
+      });
+
+      // Calculate order status
+      const orderStatusData = calcOrderStatus(txNow);
+      setOrderStatus(orderStatusData);
+
+      // Generate sales chart data (last 12 months)
+      const chartData = await generateSalesData(token, dashCur);
+      setSalesData(chartData);
+
+    } catch (error) {
+      console.error('Dashboard load error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const calcStats = (txs: any[], currency: string) => {
+    let gross = 0, paid = 0, cardTry = 0, cardOk = 0;
+    
+    txs.forEach(tx => {
+      if (tx.payment_method === 'card') {
+        cardTry++;
+        if (isSuccess(tx)) cardOk++;
+      }
+      if (isSuccess(tx)) {
+        paid++;
+        // Use the correct currency field based on dashboard currency
+        gross += currency === 'USD'
+          ? (tx.amount_usd ?? tx.amount ?? 0)
+          : (tx.amount_brl ?? tx.amount ?? 0);
+      }
+    });
+
+    return {
+      gross,
+      paid,
+      acceptance: cardTry ? (cardOk / cardTry * 100) : 0
+    };
+  };
+
+  const calcOrderStatus = (txs: any[]) => {
+    let total = txs.length;
+    let paid = 0, chargeback = 0, refunded = 0;
+
+    txs.forEach(tx => {
+      if (isSuccess(tx)) paid++;
+      else if (tx.status === 'chargeback') chargeback++;
+      else if (tx.status === 'refunded') refunded++;
+    });
+
+    return {
+      paid: {
+        amount: paid,
+        percent: total ? Math.round((paid / total) * 100) : 0
+      },
+      chargeback: {
+        amount: chargeback,
+        percent: total ? Math.round((chargeback / total) * 100) : 0
+      },
+      refunded: {
+        amount: refunded,
+        percent: total ? Math.round((refunded / total) * 100) : 0
+      }
+    };
+  };
+
+  const isSuccess = (tx: any) => ['captured', 'succeeded'].includes(tx.status);
+
+  const percentChange = (now: number, prev: number) => {
+    if (prev === 0) return now === 0 ? 0 : null;
+    return Math.round(((now - prev) / prev) * 100);
+  };
+
+  const generateSalesData = async (token: string, currency: string) => {
+    const data = [];
+    const now = new Date();
+    
+    for (let i = 11; i >= 0; i--) {
+      const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+      
+      try {
+        const response = await fetch(`/api/finance/transactions?fromDate=${monthStart.toISOString()}&toDate=${monthEnd.toISOString()}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+          const stats = calcStats(result.data.transactions, currency);
+          data.push({
+            month: monthStart.toLocaleDateString('en-US', { month: 'short' }),
+            value: stats.gross
+          });
+        } else {
+          data.push({
+            month: monthStart.toLocaleDateString('en-US', { month: 'short' }),
+            value: 0
+          });
+        }
+      } catch (error) {
+        data.push({
+          month: monthStart.toLocaleDateString('en-US', { month: 'short' }),
+          value: 0
+        });
+      }
+    }
+    
+    return data;
+  };
+
+  const getDateRange = (filter: number) => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const iso = (d: Date) => d.toISOString();
+
+    switch (filter) {
+      case 0: // today
+        return { from: iso(today), to: iso(new Date(today.getTime() + 24 * 60 * 60 * 1000)) };
+      case 1: // yesterday
+        const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+        return { from: iso(yesterday), to: iso(today) };
+      case 7: // last 7 days
+        const week = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+        return { from: iso(week), to: iso(new Date(today.getTime() + 24 * 60 * 60 * 1000)) };
+      case 30: // last 30 days
+        const month = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+        return { from: iso(month), to: iso(new Date(today.getTime() + 24 * 60 * 60 * 1000)) };
+      default:
+        return { from: iso(today), to: iso(new Date(today.getTime() + 24 * 60 * 60 * 1000)) };
+    }
+  };
+
+  const getPreviousDateRange = (filter: number, current: any) => {
+    const currentDate = new Date(current.from);
+    const daysDiff = Math.ceil((new Date(current.to).getTime() - currentDate.getTime()) / (1000 * 60 * 60 * 24));
+    const prevStart = new Date(currentDate.getTime() - daysDiff * 24 * 60 * 60 * 1000);
+    const prevEnd = new Date(prevStart.getTime() + daysDiff * 24 * 60 * 60 * 1000);
+    
+    return {
+      from: prevStart.toISOString(),
+      to: prevEnd.toISOString()
+    };
+  };
+
+  const periods = [
+    { value: 0, label: 'Today' },
+    { value: 1, label: 'Yesterday' },
+    { value: 7, label: 'Last 7 days' },
+    { value: 30, label: 'Last 30 days' }
+  ];
+
+  const formatCurrency = (amount: number | null, currency: string = dashboardCurrency) => {
+    if (amount === null) return 'N/A';
+    const locales = currency === 'BRL' ? 'pt-BR' : 'en-US';
+    return new Intl.NumberFormat(locales, {
+      style: 'currency',
+      currency: currency
+    }).format(amount);
+  };
+
+  const formatPercentage = (value: number | null) => {
+    if (value === null) return 'N/A';
+    const arrow = value >= 0 ? '▲' : '▼';
+    return `${arrow} ${Math.abs(value)}%`;
+  };
+
+  // Don't render anything until we're on the client side
+  if (!isClient) {
+    return null;
+  }
+
+  if (loading) {
+    return (
+      <DashLayout titleArea={<h2 className="text-xl font-semibold">Loading...</h2>}>
+        <div className="flex items-center justify-center h-64">
+          <div className="text-gray-500">Loading dashboard...</div>
+        </div>
+      </DashLayout>
+    );
+  }
+
+  return (
+    <DashLayout
+      titleArea={
+        <>
+          <h2 className="text-xl font-semibold">
+            Hello, {merchantData?.businessName || 'Business'}
+          </h2>
+          <p className="text-sm text-gray-500">
+            {new Intl.DateTimeFormat('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: '2-digit',
+            }).format(new Date())}
+          </p>
+        </>
+      }
+      tools={
+        <Menu as="div" className="relative inline-block text-left">
+          <div>
+            <MenuButton className="inline-flex items-center gap-2 border border-gray-400 px-3 py-1 rounded-full text-sm font-medium text-gray-700 hover:bg-gray-100 cursor-pointer">
+              <ListFilter className="w-4 h-4 text-indigo-900" />
+              {periods.find(p => p.value === period)?.label || 'Today'}
+            </MenuButton>
+          </div>
+          <MenuItems className="absolute right-0 z-10 mt-2 w-40 origin-top-right rounded-md bg-white ring-1 ring-gray-300 focus:outline-none cursor-pointer">
+            <div className="py-1">
+              {periods.map((p) => (
+                <MenuItem key={p.value}>
+                  <button
+                    className="hover:bg-gray-100 hover:text-black text-gray-700 w-full px-4 py-2 text-left text-sm cursor-pointer"
+                    onClick={() => setPeriod(p.value)}
+                  >
+                    {p.label}
+                  </button>
+                </MenuItem>
+              ))}
+            </div>
+          </MenuItems>
+        </Menu>
+      }
+    >
+      <div className="grid grid-cols-3 gap-6">
+        <div className="col-span-3 lg:col-span-2 space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 bg-white px-4 py-2 rounded-2xl">
+            <div className="mt-4 mb-4 pl-4 pr-2 border-r-none lg:border-r border-gray-200">
+              <p className="text-[#777B84] font-semibold text-sm mb-2 truncate overflow-hidden whitespace-nowrap">
+                Gross Revenue
+              </p>
+              <div className="flex items-center space-x-3">
+                <h3 className="text-xl font-bold">{formatCurrency(orderOverview?.gross?.amount || 0)}</h3>
+                {orderOverview?.gross?.delta !== null && (
+                  <p className={`text-xs px-2 rounded-xl truncate overflow-hidden whitespace-nowrap ${
+                    orderOverview?.gross?.delta >= 0 ? 'text-[#309147] bg-[#E9FFE1]' : 'text-red-500 bg-red-100'
+                  }`}>
+                    {formatPercentage(orderOverview?.gross?.delta)}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="mt-4 mb-4 pl-4 pr-2 lg:pl-10 border-r-none lg:border-r border-gray-200">
+              <p className="text-[#777B84] font-semibold text-sm mb-2 truncate overflow-hidden whitespace-nowrap">
+                Paid Order
+              </p>
+              <div className="flex items-center space-x-3">
+                <h3 className="text-xl font-bold">{orderOverview?.paidOrder?.amount || 0}</h3>
+                {orderOverview?.paidOrder?.delta !== null && (
+                  <p className={`text-xs px-2 rounded-xl truncate overflow-hidden whitespace-nowrap ${
+                    orderOverview?.paidOrder?.delta >= 0 ? 'text-[#309147] bg-[#E9FFE1]' : 'text-red-500 bg-red-100'
+                  }`}>
+                    {formatPercentage(orderOverview?.paidOrder?.delta)}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="mt-4 mb-4 pl-4 pr-2 lg:pl-10">
+              <p className="text-[#777B84] font-semibold text-sm mb-2 truncate overflow-hidden whitespace-nowrap">
+                Card Acceptance
+              </p>
+              <div className="flex items-center space-x-3">
+                <h3 className="text-xl font-bold">{orderOverview?.averageSucceedOrder?.amount?.toFixed(1) || 0}%</h3>
+                {orderOverview?.averageSucceedOrder?.delta !== null && (
+                  <p className={`text-xs px-2 rounded-xl truncate overflow-hidden whitespace-nowrap ${
+                    orderOverview?.averageSucceedOrder?.delta >= 0 ? 'text-[#309147] bg-[#E9FFE1]' : 'text-red-500 bg-red-100'
+                  }`}>
+                    {formatPercentage(orderOverview?.averageSucceedOrder?.delta)}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+          {/* Sale Overview*/}
+          <div className="bg-white p-6 rounded-2xl">
+            <h4 className="font-semibold mb-2 text-[#777B84] text-xl">Sales Overview</h4>
+            <p className="text-sm text-[#BEBEBE] mb-4">Track your company daily volume</p>
+            <ResponsiveContainer width="100%" height={338}>
+              <AreaChart data={salesData}>
+                <defs>
+                  <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#006AFF" stopOpacity={0.8} />
+                    <stop offset="95%" stopColor="#006AFF" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <XAxis dataKey="month" stroke="#9FA6B2" tickLine={false} tick={{ fontSize: 12 }} />
+                <YAxis
+                  dataKey="value"
+                  stroke="#9FA6B2"
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(value) => {
+                    if (value === 0) return value;
+                    return dashboardCurrency === 'BRL' ? `R$ ${value}` : `$ ${value}`;
+                  }}
+                  tick={{ fontSize: 12 }}
+                />
+                <CartesianGrid stroke="#D2D6DC33" vertical={false} />
+                <Tooltip content={<CustomTooltip />} />
+                <Area type="monotone" dataKey="value" stroke="#006AFF" fillOpacity={1} fill="url(#colorSales)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+        <div className="col-span-3 lg:col-span-1 space-y-4 w-full text-sm text-black">
+          {/* Balance Section */}
+          <div className="p-4 bg-white rounded-xl space-y-4">
+            <div className="flex justify-between items-start">
+              <div>
+                <h4 className="text-[#777B84] font-semibold my-1">Total Balance (USD)</h4>
+                <p className="text-xl font-semibold my-2">{formatCurrency(balances?.USD?.totalBalance || 0, 'USD')}</p>
+                <p className="text-[#BEBEBE] my-1 truncate overflow-hidden whitespace-nowrap text-sm">
+                Total Balance in USD
+                </p>
+              </div>
+              <Link
+                href="/merchant/finance"
+                className="font-normal text-gray-600 hover:underline truncate overflow-hidden whitespace-nowrap"
+              >
+                See Details
+              </Link>
+            </div>
+
+            <hr className="border-gray-200" />
+
+            <div className="flex justify-between items-start">
+              <div>
+                <h4 className="text-[#777B84] font-semibold my-1">Total Balance (BRL)</h4>
+                <p className="text-xl font-semibold my-2">{formatCurrency(balances?.BRL?.totalBalance || 0, 'BRL')}</p>
+                <p className="text-[#BEBEBE] my-1 truncate overflow-hidden whitespace-nowrap text-sm">
+                Total Balance in BRL
+                </p>
+              </div>
+              <Link
+                href="/merchant/finance"
+                className="font-normal text-gray-600 hover:underline truncate overflow-hidden whitespace-nowrap"
+              >
+                See Details
+              </Link>
+            </div>
+          </div>
+
+          {/* Account Status Section */}
+          <div className="p-4 bg-white rounded-xl">
+            <h4 className="font-semibold text-[#090E18] mb-1 text-base">Account status</h4>
+            <p className="text-sm text-[#BEBEBE] mb-4 truncate overflow-hidden whitespace-nowrap">
+              Paid Orders, Chargebacks, Refunded
+            </p>
+            <div className="space-y-3">
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16">
+                  <CircularProgressbar
+                    value={orderStatus?.paid?.percent || 0}
+                    text={`${orderStatus?.paid?.percent || 0}%`}
+                    strokeWidth={10}
+                    styles={buildStyles({
+                      pathColor: '#006aff',
+                      textColor: '#2E3033',
+                      trailColor: '#E5E5FD',
+                      textSize: '20px',
+                    })}
+                  />
+                </div>
+                <div>
+                  <p className="font-semibold text-base text-[#090E18] truncate overflow-hidden whitespace-nowrap">
+                    Paid Orders
+                  </p>
+                  <p className="text-sm text-[#BEBEBE] truncate overflow-hidden whitespace-nowrap">
+                    {orderStatus?.paid?.amount || 0} in this period
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16">
+                  <CircularProgressbar
+                    value={orderStatus?.chargeback?.percent || 0}
+                    text={`${orderStatus?.chargeback?.percent || 0}%`}
+                    strokeWidth={10}
+                    styles={buildStyles({
+                      pathColor: '#DE0707',
+                      textColor: '#2E3033',
+                      trailColor: '#FBF3F4',
+                      textSize: '20px',
+                    })}
+                  />
+                </div>
+                <div>
+                  <p className="font-semibold text-base text-[#090E18] truncate overflow-hidden whitespace-nowrap">
+                    Chargebacks
+                  </p>
+                  <p className="text-sm text-[#BEBEBE] truncate overflow-hidden whitespace-nowrap">
+                    {orderStatus?.chargeback?.amount || 0} in this period
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16">
+                  <CircularProgressbar
+                    value={orderStatus?.refunded?.percent || 0}
+                    text={`${orderStatus?.refunded?.percent || 0}%`}
+                    strokeWidth={10}
+                    styles={buildStyles({
+                      pathColor: '#808080',
+                      textColor: '#2E3033',
+                      trailColor: '#EFEFEF',
+                      textSize: '20px',
+                    })}
+                  />
+                </div>
+                <div>
+                  <p className="font-semibold text-base text-[#090E18] truncate overflow-hidden whitespace-nowrap">
+                    Refunded
+                  </p>
+                  <p className="text-sm text-[#BEBEBE] truncate overflow-hidden whitespace-nowrap">
+                    {orderStatus?.refunded?.amount || 0} in this period
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </DashLayout>
+  );
+};
+
+export default Dashboard;
+
+// File: app/merchant/settings/page.tsx
+
+'use client';
+
+import { DashLayout } from '@/components/layouts';
+import { MoreHorizontal } from 'lucide-react';
+
+import Image from 'next/image';
+import { Suspense, useEffect, useState } from 'react';
+
+import { Pagination } from '@/components/widgets';
+import { ITEMS_PER_PAGE } from '@/consts/vars';
+import { useApiRequest } from '@/hooks';
+import { transactionsUrl } from '@/consts/paths';
+import Toaster from '@/helpers/Toaster';
+import { Transaction, TransactionData } from '@/types';
+import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
+import { txDataMock } from '@/mock';
+
+import excelIcon from '@/assets/images/icons/excel-export.svg';
+import orderNormalIcon from '@/assets/images/icons/order-normal.svg';
+import orderAscIcon from '@/assets/images/icons/order-asc.svg';
+import orderDescIcon from '@/assets/images/icons/order-desc.svg';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { txStatusStyles } from '@/consts/styles';
+import { BusinessSettingsTab, FeeSettingsTab, ProfileSettingsTab } from '@/components/ui';
+import Link from 'next/link';
+
+const formatter = new Intl.NumberFormat('en-US', {
+  style: 'decimal',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+const tabs: Record<'business' | 'security' | 'fee', string> = {
+  business: 'Business Details',
+  security: 'Login & Security',
+  fee: 'Account Fees',
+};
+
+const RawSettingsPage = () => {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const [activeTab, setActiveTab] = useState<'business' | 'security' | 'fee'>('business');
+
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab && ['business', 'security', 'fee'].includes(tab)) {
+      setActiveTab(tab as 'business' | 'security' | 'fee');
+    }
+  }, [searchParams]);
+
+  return (
+    <DashLayout
+      titleArea={
+        <>
+          <h2 className="text-xl font-semibold">Settings</h2>
+        </>
+      }
+    >
+      <div className="px-2 py-4 bg-white rounded-lg">
+        <div className="flex items-center justify-between border-b border-b-gray-200 mx-2 mb-3 pb-2">
+          <div className="flex space-x-4 text-sm font-medium text-gray-900">
+            {['business', 'security', 'fee'].map((tab) => (
+              <Link
+                key={tab}
+                className={`${
+                  activeTab === tab ? 'text-blue-500' : 'cursor-pointer hover:text-gray-500'
+                } transition-colors duration-200 ease-in-out`}
+                href={`/merchant/settings?tab=${tab}`}
+              >
+                {tabs[tab as 'business' | 'security' | 'fee']}
+              </Link>
+            ))}
+          </div>
+        </div>
+        <div className="max-w-5xl px-2">
+          {activeTab === 'business' && <BusinessSettingsTab />}
+          {activeTab === 'fee' && <FeeSettingsTab />}
+          {activeTab === 'security' && <ProfileSettingsTab />}
+        </div>
+      </div>
+    </DashLayout>
+  );
+};
+
+export default function SettingsPage() {
+  return (
+    <Suspense>
+      <RawSettingsPage />
+    </Suspense>
+  );
+}
+
+
+// File: components/ui/ProfileSettingsTab.tsx
+
+'use client';
+
+import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react';
+import { useState } from 'react';
+
+import Image from 'next/image';
+
+import profileImg from '@/assets/images/icons/profile.svg';
+import profileActiveImg from '@/assets/images/icons/profile-active.svg';
+import tfaImg from '@/assets/images/icons/2fa.svg';
+import tfaActiveImg from '@/assets/images/icons/2fa-active.svg';
+import deleteImg from '@/assets/images/icons/delete.svg';
+import deleteActiveImg from '@/assets/images/icons/delete-active.svg';
+import ProfileSlot from './ProfileSlot';
+import DeactivateSlot from './DeactivateSlot';
+import TFASlot from './TFASlot';
+
+const ProfileTab = () => {
+  const [slot, setSlot] = useState<'profile' | '2fa' | 'delete'>('profile');
+
+  return (
+    <div className="flex bg-white py-4 lg:gap-16 gap-4">
+      <div className="lg:w-56 w-12 transition-all">
+        <div className="">
+          <button
+            className={`flex items-center w-full text-left px-4 py-2  gap-2 rounded-md font-medium text-[14px] cursor-pointer h-10 ${
+              slot === 'profile' ? 'bg-blue-100 text-blue-500' : 'text-gray-900'
+            }`}
+            onClick={() => setSlot('profile')}
+          >
+            <Image src={slot === 'profile' ? profileActiveImg : profileImg} alt="Profile" className="w-4 h-4" />
+            <span className="lg:inline hidden truncate">Profile settings</span>
+          </button>
+          <button
+            className={`flex items-center w-full text-left px-4 py-2  gap-2 rounded-md font-medium text-[14px] cursor-pointer h-10 ${
+              slot === '2fa' ? 'bg-blue-100 text-blue-500' : 'text-gray-900'
+            }`}
+            onClick={() => setSlot('2fa')}
+          >
+            <Image src={slot === '2fa' ? tfaActiveImg : tfaImg} alt="Profile" className="w-4 h-4" />
+            <span className="lg:inline hidden truncate">2FA Verification</span>
+          </button>
+          <button
+            className={`flex items-center w-full text-left px-4 py-2  gap-2 rounded-md font-medium text-[14px] cursor-pointer h-10 ${
+              slot === 'delete' ? 'bg-blue-100 text-blue-500' : 'text-gray-900'
+            }`}
+            onClick={() => setSlot('delete')}
+          >
+            <Image src={slot === 'delete' ? deleteActiveImg : deleteImg} alt="Profile" className="w-4 h-4" />
+            <span className="lg:inline hidden truncate">Account Deactivation</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Main content */}
+      <div className="flex-1">
+        {slot === 'profile' && <ProfileSlot />}
+        {slot === 'delete' && <DeactivateSlot />}
+        {slot === '2fa' && <TFASlot />}
+      </div>
+    </div>
+  );
+};
+
+export default ProfileTab;
+
+
+// File: consts/paths.ts
+
+export const apiBaseUrl = `${process.env.NEXT_PUBLIC_API_URL}`;
+
+// auth
+export const signupUrl = `/auth/register`;
+export const signinUrl = `/auth/login`;
+export const meUrl = `/auth/me`;
+
+// onboarding
+export const onboardingBusinessUrl = `/onboarding/business`;
+export const onboardingAddressUrl = `/onboarding/address`;
+export const onboardingSellingUrl = `/onboarding/selling-method`;
+
+// notifications
+export const notiUrl = `/notifications`;
+
+// transactions
+export const transactionsUrl = `/transactions`;
+export const transactionDetailUrl = `/transactions`;
+
+// products
+export const productsUrl = `/products`;
+export const productDetailUrl = `/products`;
+
+// integrations
+export const webhooksUrl = `/webhooks`;
+
+// finance
+export const payoutsUrl = `/payouts`;
+export const payoutDetailUrl = `/payouts`;
+export const payoutAccountsUrl = `/payouts/accounts`;
+
+// settings
+export const tfaStatusUrl = `/settings/tfa/status`;
+export const profileUrl = `/settings/profile`;
+export const profileOTPUrl = `/settings/profile/otp`;
+export const passwordChangeUrl = `/settings/profile/changepassword`;
+export const emailChangeUrl = `/settings/profile/changemail`;
+export const mailOTPUrl = `/settings/profile/otpmail`;
+export const authenticatorCodeUrl = `/settings/auth/app/code`;
+export const authenticatorVerifyUrl = `/settings/auth/app/verify`;
+
+// File: middleware.ts
+
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+
+export function middleware(request: NextRequest) {
+  const token = request.cookies.get('token')?.value;
+  const pathname = request.nextUrl.pathname;
+
+  // Public paths that don't require authentication
+  const publicPaths = ['/', '/signin', '/signup'];
+  const isPublicPath = publicPaths.includes(pathname);
+  
+  // Onboarding paths
+  const isOnboardingPath = pathname.startsWith('/onboarding');
+  
+  // Merchant paths
+  const isMerchantPath = pathname.startsWith('/merchant');
+
+  // If no token and trying to access protected route
+  if (!token && !isPublicPath && !isOnboardingPath) {
+    return NextResponse.redirect(new URL('/signup', request.url));
+  }
+
+  // If has token and trying to access public auth pages (signin/signup)
+  if (token && (pathname === '/signin' || pathname === '/signup')) {
+    // We need to check user status, but since middleware can't make async calls easily,
+    // we'll let the pages handle the redirect based on onboarding status
+    return NextResponse.next();
+  }
+
+  // If has token and trying to access merchant area
+  if (token && isMerchantPath) {
+    // Let the merchant pages handle onboarding checks
+    return NextResponse.next();
+  }
+
+  // If has token and trying to access onboarding
+  if (token && isOnboardingPath) {
+    // Let the onboarding pages handle completion checks
+    return NextResponse.next();
+  }
+
+  // Allow requests to continue
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: [
+    /*
+     * Match all request paths except for the ones starting with:
+     * - api (API routes)
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     * - assets (static assets)
+     */
+    '/((?!api|_next/static|_next/image|favicon.ico|assets).*)',
+  ],
+};
+
+helpers/Toasters.txs
+
+import React from 'react';
+import { toast } from 'react-toastify';
+
+class Toaster {
+  public static success(message: string): void {
+    toast.success(message, {
+      position: 'top-right',
+      autoClose: 5000,
+      hideProgressBar: false,
+      closeOnClick: true,
+      pauseOnHover: true,
+      draggable: true,
+    });
+  }
+
+  public static error(message: string): void {
+    toast.error(message, {
+      position: 'top-right',
+      autoClose: 5000,
+      hideProgressBar: false,
+      closeOnClick: true,
+      pauseOnHover: true,
+      draggable: true,
+    });
+  }
+
+  public static info(message: string): void {
+    toast.info(message, {
+      position: 'top-right',
+      autoClose: 5000,
+      hideProgressBar: false,
+      closeOnClick: true,
+      pauseOnHover: true,
+      draggable: true,
+    });
+  }
+
+  public static warning(message: string): void {
+    toast.warning(message, {
+      position: 'top-right',
+      autoClose: 5000,
+      hideProgressBar: false,
+      closeOnClick: true,
+      pauseOnHover: true,
+      draggable: true,
+    });
+  }
+}
+
+export default Toaster;
+
+consts/api.ts
+// API configuration
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+
+// API endpoints
+export const API_ENDPOINTS = {
+  AUTH: {
+    LOGIN: '/auth/login',
+    ME: '/auth/me',
+    REGISTER: '/auth/register'
+  },
+  FINANCE: {
+    BALANCE: '/finance/balance',
+    TRANSACTIONS: '/finance/transactions'
+  }
+};
+
+consts/paths.ts
+
+export const apiBaseUrl = `${process.env.NEXT_PUBLIC_API_URL}`;
+
+// auth
+export const signupUrl = `/auth/register`;
+export const signinUrl = `/auth/login`;
+export const meUrl = `/auth/me`;
+
+// onboarding
+export const onboardingBusinessUrl = `/onboarding/business`;
+export const onboardingAddressUrl = `/onboarding/address`;
+export const onboardingSellingUrl = `/onboarding/selling-method`;
+
+// notifications
+export const notiUrl = `/notifications`;
+
+// transactions
+export const transactionsUrl = `/transactions`;
+export const transactionDetailUrl = `/transactions`;
+
+// products
+export const productsUrl = `/products`;
+export const productDetailUrl = `/products`;
+
+// integrations
+export const webhooksUrl = `/webhooks`;
+
+// finance
+export const payoutsUrl = `/payouts`;
+export const payoutDetailUrl = `/payouts`;
+export const payoutAccountsUrl = `/payouts/accounts`;
+
+// settings
+export const tfaStatusUrl = `/settings/tfa/status`;
+export const profileUrl = `/settings/profile`;
+export const profileOTPUrl = `/settings/profile/otp`;
+export const passwordChangeUrl = `/settings/profile/changepassword`;
+export const emailChangeUrl = `/settings/profile/changemail`;
+export const mailOTPUrl = `/settings/profile/otpmail`;
+export const authenticatorCodeUrl = `/settings/auth/app/code`;
+export const authenticatorVerifyUrl = `/settings/auth/app/verify`;
