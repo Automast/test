@@ -8,7 +8,7 @@ import { useApiRequest } from '@/hooks';
 import { API_ENDPOINTS } from '@/consts/api';
 import { Notification } from '@/types';
 import { mockNotiData } from '@/mock';
-import Image from 'next/image';
+import Image from 'next/image'; // This import is present but not used. Consider removing if not needed.
 import { useRouter } from 'next/navigation';
 
 const DashLayout: React.FC<{ children: ReactNode; titleArea: ReactNode; tools?: ReactNode }> = ({
@@ -41,7 +41,7 @@ const DashLayout: React.FC<{ children: ReactNode; titleArea: ReactNode; tools?: 
 
   const fetchUserProfile = async () => {
     if (typeof window === 'undefined') return;
-    
+
     try {
       const token = localStorage.getItem('jwt_token');
       if (!token) {
@@ -61,6 +61,10 @@ const DashLayout: React.FC<{ children: ReactNode; titleArea: ReactNode; tools?: 
       if (response.status === 401) {
         localStorage.removeItem('jwt_token');
         localStorage.removeItem('user_data');
+        // Also clear the cookie named 'token' on unauthorized access
+        if (typeof document !== 'undefined') {
+          document.cookie = 'token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+        }
         router.push('/signin');
         return;
       }
@@ -82,14 +86,27 @@ const DashLayout: React.FC<{ children: ReactNode; titleArea: ReactNode; tools?: 
 
   const handleLogout = async () => {
     if (typeof window === 'undefined') return;
-    
+
     try {
-      // Just clear local storage and redirect
+      // Clear local storage
       localStorage.removeItem('jwt_token');
       localStorage.removeItem('user_data');
+
+      // Clear the cookie named 'token'
+      // To delete a cookie, you set its expiration date to a past date.
+      // Ensure the path and domain match how the cookie was set.
+      // If the cookie was set with a specific path or domain, you'll need to include those here.
+      // For a general case, `path=/` should work for cookies set on the root.
+      if (typeof document !== 'undefined') {
+        document.cookie = 'token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+        // If you know the specific domain and path the cookie was set with, use them:
+        // document.cookie = 'token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/your-path; domain=.yourdomain.com;';
+      }
+
       router.push('/signin');
     } catch (error) {
       console.error('Error during logout:', error);
+      // Still attempt to redirect even if cookie deletion or local storage clearing fails
       router.push('/signin');
     }
   };
@@ -135,7 +152,7 @@ const DashLayout: React.FC<{ children: ReactNode; titleArea: ReactNode; tools?: 
     if (isClient) {
       sendNotiRequest();
     }
-  }, [isClient]);
+  }, [isClient, sendNotiRequest]); // Added sendNotiRequest to dependency array as it's used in the effect
 
   useEffect(() => {
     if (notiError) {
@@ -175,11 +192,11 @@ const DashLayout: React.FC<{ children: ReactNode; titleArea: ReactNode; tools?: 
             {/* Notifications */}
             <div className="relative" ref={ref}>
               <button
-                className="relative block rounded-full border-gray-300 border-1 p-1 cursor-pointer hover:bg-white transition"
+                className="relative block rounded-full border-gray-300 border p-1 cursor-pointer hover:bg-white transition" // Corrected border-1 to border
                 onClick={() => setNotiShow(!notiShow)}
               >
                 <Bell className="w-5 h-5" />
-                {notiList.length > 0 && (
+                {notiList && notiList.length > 0 && ( // Added null check for notiList
                   <span className="absolute top-1 right-[7px] block h-2 w-2 rounded-full bg-red-500" />
                 )}
               </button>
@@ -187,14 +204,14 @@ const DashLayout: React.FC<{ children: ReactNode; titleArea: ReactNode; tools?: 
                 <div className="absolute right-0 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
                   <div className="font-semibold py-2 px-4 border-b border-b-gray-300">Notifications</div>
                   <div className="p-4 text-sm text-gray-700">
-                    {notiList.length === 0 && <p>No new notifications</p>}
-                    {notiList.length > 0 &&
+                    {(!notiList || notiList.length === 0) && <p>No new notifications</p>} {/* Added null check */}
+                    {notiList && notiList.length > 0 &&
                       notiList.map((noti) => (
                         <div key={noti.id} className="flex items-center gap-2 mb-2">
                           <div>
                             <p className="font-medium text-sm truncate">{noti.title}</p>
                             <p className="text-gray-400 text-xs">
-                              {noti.date.toLocaleString('en-US', {
+                              {new Date(noti.date).toLocaleString('en-US', { // Ensure noti.date is a valid Date object or string
                                 month: 'short',
                                 day: 'numeric',
                                 year: 'numeric',
