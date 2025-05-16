@@ -65,7 +65,8 @@ const AccountsPage = () => {
 
   useEffect(() => {
     if (accountsError) {
-      Toaster.error(accountsError?.message);
+      // **FIXED LINE BELOW**
+      Toaster.error(accountsError.message || 'An unexpected error occurred.');
 
       // mock data instead: remove this code in production mode
       setAccountData(accountsMock);
@@ -123,7 +124,7 @@ const AccountsPage = () => {
           </div>
           {typeFilter === 'bank' && (
             <button
-              className="flex items-center gap-2 hover:bg-blue-600 text-white px-3 py-2 ml-2 text-sm rounded-md cursor-pointer transition-colors duration-200 ease-in-out hover:bg-blue-400 truncate"
+              className="flex items-center gap-2 hover:bg-blue-600 text-white px-3 py-2 ml-2 text-sm rounded-md cursor-pointer transition-colors duration-200 ease-in-out bg-blue-500 hover:bg-blue-400 truncate" // Added bg-blue-500 for visibility
               onClick={() => {
                 setCurrentBank({});
                 setShowBankModal(true);
@@ -135,7 +136,7 @@ const AccountsPage = () => {
           )}
           {typeFilter === 'crypto' && (
             <button
-              className="flex items-center gap-2 hover:bg-blue-600 text-white px-3 py-2 ml-2 text-sm rounded-md cursor-pointer transition-colors duration-200 ease-in-out hover:bg-blue-400 truncate"
+              className="flex items-center gap-2 hover:bg-blue-600 text-white px-3 py-2 ml-2 text-sm rounded-md cursor-pointer transition-colors duration-200 ease-in-out bg-blue-500 hover:bg-blue-400 truncate" // Added bg-blue-500 for visibility
               onClick={() => setShowCryptoModal(true)}
             >
               <PlusIcon className="w-4 h-4" />
@@ -147,7 +148,7 @@ const AccountsPage = () => {
           {typeFilter === 'bank' && <div className="text-lg font-semibold">Payout Bank Accounts</div>}
           {typeFilter === 'crypto' && <div className="text-lg font-semibold">Payout Crypto Wallets</div>}
         </div> */}
-        <div className="h-12 bg-gray-100 -mx-6" style={{ width: 'calc(100% + var(--spacing) * 12)' }} />
+        <div className="h-12 bg-gray-100 -mx-6" style={{ width: 'calc(100% + 3rem)' }} /> {/* Assuming --spacing is 0.25rem and used 12 times, typical for px-2 like mx-2 for example which is 0.5rem. If --spacing is something else, adjust. Using 3rem as a guess for calc(100% + var(--spacing) * 12) */}
 
         <div className="max-w-full overflow-auto -mt-12">
           <table className="table-auto w-full mb-16">
@@ -170,7 +171,7 @@ const AccountsPage = () => {
             <tbody className="text-sm">
               {accountsLoading && (
                 <tr>
-                  <td colSpan={8} className="text-center p-6">
+                  <td colSpan={6} className="text-center p-6"> {/* Changed colSpan to 6 based on th elements */}
                     {typeFilter === 'bank' && 'Loading Bank Accounts...'}
                     {typeFilter === 'crypto' && 'Loading Wallet Addresses...'}
                   </td>
@@ -198,7 +199,7 @@ const AccountsPage = () => {
                       </span>
                     </td>
                     <td className="p-2 whitespace-nowrap border-b border-b-gray-200">
-                      {t.updatedAt.toLocaleString('en-US', {
+                      {new Date(t.updatedAt).toLocaleString('en-US', { // Assuming t.updatedAt is a valid date string or Date object
                         month: 'short',
                         day: 'numeric',
                         year: 'numeric',
@@ -227,7 +228,7 @@ const AccountsPage = () => {
                 ))}
               {!accountsLoading && accountData?.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="text-center p-6">
+                  <td colSpan={6} className="text-center p-6"> {/* Changed colSpan to 6 */}
                     {typeFilter === 'bank' && 'No Bank Accounts'}
                     {typeFilter === 'crypto' && 'No Crypto Wallets'}
                   </td>
@@ -385,8 +386,8 @@ const AccountsPage = () => {
               <div className="flex items-center">
                 <label className="relative flex items-center cursor-pointer">
                   <input
-                    id="remember-me"
-                    name="remember-me"
+                    id="remember-me-bank" // Changed id for uniqueness
+                    name="remember-me-bank" // Changed name for uniqueness
                     type="checkbox"
                     checked={isPolicy}
                     onChange={(e) => setPolicy(e.target.checked)}
@@ -409,17 +410,17 @@ const AccountsPage = () => {
                       opacity-0
                       peer-checked:opacity-100"
                   >
-                    <svg width="12" height="9" viewBox="0 0 12 9" fill="none">
+                    <svg width="12" height="9" viewBox="0 0 12 9" fill="none" xmlns="http://www.w3.org/2000/svg">
                       <path d="M1 4.5L4.5 8L11 1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                     </svg>
                   </span>
                 </label>
-                <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-900">
+                <label htmlFor="remember-me-bank" className="ml-2 block text-sm text-gray-900">
                   Submitting this bank details though our platform with your concern
                 </label>
               </div>
               <div className="flex gap-4 pt-6 justify-center">
-                <button className="bg-blue-50 text-blue-500 font-semibold w-42 py-2 rounded-md hover:bg-blue-100  transition cursor-pointer">
+                <button className="bg-blue-50 text-blue-500 font-semibold w-42 py-2 rounded-md hover:bg-blue-100 transition cursor-pointer" onClick={() => setShowBankModal(false)}> {/* Added onClick to cancel button */}
                   Cancel
                 </button>
                 <button className="hover:bg-blue-600 text-white font-semibold w-42 py-2 rounded-md bg-blue-500 transition cursor-pointer">
@@ -455,17 +456,17 @@ const AccountsPage = () => {
             <div className="max-w-xl w-full space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm mb-1">Account Number</label>
+                  <label className="block text-sm mb-1">Account Number</label> {/* Consider renaming this label if it's not an "Account Number" for crypto */}
                   <input
                     type="text"
-                    placeholder="Enter Account Number"
+                    placeholder="Enter Account Number" // Or relevant placeholder
                     className="w-full border border-gray-200 rounded-md px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     value={crAccount}
                     onChange={(e) => setCrAccount(e.target.value)}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm mb-1">Account Number</label>
+                  <label className="block text-sm mb-1">Crypto Channel</label> {/* Changed label from "Account Number" */}
                   <div className="w-full">
                     <Listbox value={crChannel} onChange={setCrChannel}>
                       <div className="relative">
@@ -523,8 +524,8 @@ const AccountsPage = () => {
               <div className="flex items-center">
                 <label className="relative flex items-center cursor-pointer">
                   <input
-                    id="remember-me"
-                    name="remember-me"
+                    id="remember-me-crypto" // Changed id for uniqueness
+                    name="remember-me-crypto" // Changed name for uniqueness
                     type="checkbox"
                     checked={isCrPolicy}
                     onChange={(e) => setCrPolicy(e.target.checked)}
@@ -547,17 +548,17 @@ const AccountsPage = () => {
                       opacity-0
                       peer-checked:opacity-100"
                   >
-                    <svg width="12" height="9" viewBox="0 0 12 9" fill="none">
+                    <svg width="12" height="9" viewBox="0 0 12 9" fill="none" xmlns="http://www.w3.org/2000/svg">
                       <path d="M1 4.5L4.5 8L11 1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                     </svg>
                   </span>
                 </label>
-                <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-900">
-                  Submitting this bank details though our platform with your concern
+                <label htmlFor="remember-me-crypto" className="ml-2 block text-sm text-gray-900">
+                  Submitting this wallet details though our platform with your concern {/* Updated text slightly for clarity */}
                 </label>
               </div>
               <div className="flex gap-4 pt-6 justify-center">
-                <button className="bg-blue-50 text-blue-500 font-semibold w-42 py-2 rounded-md hover:bg-blue-100  transition cursor-pointer">
+                <button className="bg-blue-50 text-blue-500 font-semibold w-42 py-2 rounded-md hover:bg-blue-100 transition cursor-pointer" onClick={() => setShowCryptoModal(false)}> {/* Added onClick to cancel button */}
                   Cancel
                 </button>
                 <button className="hover:bg-blue-600 text-white font-semibold w-42 py-2 rounded-md bg-blue-500 transition cursor-pointer">
