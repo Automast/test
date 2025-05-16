@@ -1,58 +1,46 @@
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
+// middleware.ts
+import { NextResponse } from 'next/server'
+import type { NextRequest } from 'next/server'
 
 export function middleware(request: NextRequest) {
-  const token = request.cookies.get('token')?.value;
-  const pathname = request.nextUrl.pathname;
+  const token = request.cookies.get('token')?.value
+  const pathname = request.nextUrl.pathname
 
-  // Public paths that don't require authentication
-  const publicPaths = ['/', '/signin', '/signup', '/verify-email'];
-  const isPublicPath = publicPaths.includes(pathname);
-  
-  // Onboarding paths
-  const isOnboardingPath = pathname.startsWith('/onboarding');
-  
-  // Merchant paths
-  const isMerchantPath = pathname.startsWith('/merchant');
+  // Public routes (no auth required)
+  const publicPaths = ['/', '/signin', '/signup', '/verify-email']
+  const isPublicPath = publicPaths.includes(pathname)
 
-  // If no token and trying to access protected route
+  // Onboarding routes
+  const isOnboardingPath = pathname.startsWith('/onboarding')
+
+  // Merchant (dashboard) routes
+  const isMerchantPath = pathname.startsWith('/merchant')
+
+  // 1) Unauthenticated users trying to hit any protected route
   if (!token && !isPublicPath && !isOnboardingPath) {
-    return NextResponse.redirect(new URL('/signup', request.url));
+    // Redirect them to /signin (not /signup)
+    return NextResponse.redirect(new URL('/signin', request.url))
   }
 
-  // If has token and trying to access public auth pages (signin/signup)
+  // 2) Authenticated users trying to hit the auth pages
   if (token && (pathname === '/signin' || pathname === '/signup')) {
-    // We need to check user status, but since middleware can't make async calls easily,
-    // we'll let the pages handle the redirect based on onboarding status
-    return NextResponse.next();
+    // Send them straight to /merchant
+    return NextResponse.redirect(new URL('/merchant', request.url))
   }
 
-  // If has token and trying to access merchant area
-  if (token && isMerchantPath) {
-    // Let the merchant pages handle onboarding checks
-    return NextResponse.next();
-  }
-
-  // If has token and trying to access onboarding
-  if (token && isOnboardingPath) {
-    // Let the onboarding pages handle completion checks
-    return NextResponse.next();
-  }
-
-  // Allow requests to continue
-  return NextResponse.next();
+  // 3) All other cases (including /merchant & /onboarding if token exists)
+  return NextResponse.next()
 }
 
 export const config = {
   matcher: [
     /*
-     * Match all request paths except for the ones starting with:
-     * - api (API routes)
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - assets (static assets)
+     * Match all routes EXCEPT:
+     *  - /api/*
+     *  - Next.js internals (_next/static, _next/image)
+     *  - favicon.ico
+     *  - assets/*
      */
     '/((?!api|_next/static|_next/image|favicon.ico|assets).*)',
   ],
-};
+}
