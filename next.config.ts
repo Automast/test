@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
         source: '/api/:path*',
         // WARNING: This 'localhost' destination will NOT work correctly when deployed to Vercel.
         // Vercel builds will run, but your deployed app's API calls using this rewrite will fail.
-        destination: 'http://localhost:5000/api/:path*',
+        destination: 'https://gatewaymvp-production.up.railway.app/api/:path*',
       },
     ];
   },
