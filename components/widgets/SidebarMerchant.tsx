@@ -175,7 +175,7 @@ const Sidebar = () => {
                   Cancel
                 </button>
                 <button
-                  className="bg-red-500 text-white font-semibold py-2.5 rounded-md hover:bg-red-600 transition cursor-pointer" // Changed to red for destructive action
+                  className="bg-blue-500 text-white font-semibold py-2.5 rounded-md hover:bg-blue-600 transition cursor-pointer" // Changed to red for destructive action
                   onClick={(e) => {
                     e.stopPropagation();
                     setConfirmModal(false);
