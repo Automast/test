@@ -1,3 +1,8 @@
+// app/verify-email/page.js
+
+// 1. Disable static prerendering for this route so client-only hooks work
+export const dynamic = 'force-dynamic';
+
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -54,7 +59,7 @@ export default function VerifyEmailPage() {
 
     verify();
     return () => { done = true; };
-}, [token]);
+  }, [token, verifyEmail]);
 
   useEffect(() => {
     if (verified) {
