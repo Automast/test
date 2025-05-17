@@ -1,9 +1,7 @@
-// app/verify-email/page.js
-
-// 1. Disable static prerendering for this route so client-only hooks work
-export const dynamic = 'force-dynamic';
+// app/verify-email/page.tsx
 
 'use client';
+export const dynamic = 'force-dynamic';
 
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -17,7 +15,7 @@ export default function VerifyEmailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
-  
+
   const [verifying, setVerifying] = useState(true);
   const [verified, setVerified] = useState(false);
   const [error, setError] = useState('');
@@ -48,7 +46,7 @@ export default function VerifyEmailPage() {
         } else if (!done) {
           setError(response?.message || 'Verification failed');
         }
-      } catch (err: any) {
+      } catch {
         if (!done) {
           setError('An error occurred during verification');
         }
@@ -73,7 +71,7 @@ export default function VerifyEmailPage() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4 sm:px-6 lg:px-8">
       <div className="w-full max-w-md">
-        {/* Logo area */}
+        {/* Logo */}
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold text-blue-600">ArkusPay</h1>
         </div>
