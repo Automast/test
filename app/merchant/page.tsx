@@ -3,8 +3,12 @@
 import React, { useState, useEffect } from 'react';
 import { XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area, CartesianGrid } from 'recharts';
 import { DashLayout } from '@/components/layouts';
-import { ListFilter } from 'lucide-react';
+import { ListFilter, AlertTriangle, Mail, Shield, RefreshCw } from 'lucide-react'; // Removed ArrowLeft as it's not used
 import { CircularProgressbar, buildStyles } from 'react-circular-progressbar';
+import { useVerification } from '@/context/VerificationContext';
+import { useApiRequest } from '@/hooks';
+import { sendVerificationEmailUrl } from '@/consts/paths';
+import Toaster from '@/helpers/Toaster';
 
 import 'react-circular-progressbar/dist/styles.css';
 import '@/assets/styles/dashboard.css';
@@ -37,6 +41,22 @@ const Dashboard = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [dashboardCurrency, setDashboardCurrency] = useState<string>('USD');
   const [isClient, setIsClient] = useState(false);
+  const [verificationLink, setVerificationLink] = useState<string | null>(null);
+  const [initialEmailResent, setInitialEmailResent] = useState(false);
+
+  // Verification context
+  const {
+    fetchStatus,
+    status,
+    rejectedFields,
+    verificationData
+  } = useVerification();
+
+  // Email verification
+  const { sendRequest: resendVerificationEmail, loading: emailLoading } = useApiRequest({
+    endpoint: sendVerificationEmailUrl,
+    method: 'POST',
+  });
 
   const formatter = new Intl.NumberFormat('en-US', {
     style: 'decimal',
@@ -49,7 +69,7 @@ const Dashboard = () => {
     setIsClient(true);
   }, []);
 
-  // Authentication check
+  // Authentication check and load dashboard
   useEffect(() => {
     if (isClient) {
       if (typeof window !== 'undefined') {
@@ -63,13 +83,20 @@ const Dashboard = () => {
     }
   }, [period, isClient]);
 
+  // Initialize verification context
+  useEffect(() => {
+    if (isClient && userData) {
+      fetchStatus();
+    }
+  }, [isClient, userData, fetchStatus]);
+
   const loadDashboard = async () => {
     if (typeof window === 'undefined') return;
-    
+
     try {
       setLoading(true);
       const token = localStorage.getItem('jwt_token');
-      
+
       if (!token) {
         window.location.href = '/signin';
         return;
@@ -98,6 +125,9 @@ const Dashboard = () => {
       const { user, merchant } = meData.data;
       setUserData(user);
       setMerchantData(merchant);
+
+      // Store user data in localStorage for verification page
+      localStorage.setItem('user_data', JSON.stringify(merchant));
 
       // Determine dashboard currency based on merchant country
       const isBrazil = merchant.country === 'BR';
@@ -142,7 +172,7 @@ const Dashboard = () => {
       // Process transaction data for metrics
       const txNow = txNowData.success ? txNowData.data.transactions : [];
       const txPrev = txPrevData.success ? txPrevData.data.transactions : [];
-      
+
       const statsNow = calcStats(txNow, dashCur);
       const statsPrev = calcStats(txPrev, dashCur);
 
@@ -178,7 +208,7 @@ const Dashboard = () => {
 
   const calcStats = (txs: any[], currency: string) => {
     let gross = 0, paid = 0, cardTry = 0, cardOk = 0;
-    
+
     txs.forEach(tx => {
       if (tx.payment_method === 'card') {
         cardTry++;
@@ -236,11 +266,11 @@ const Dashboard = () => {
   const generateSalesData = async (token: string, currency: string) => {
     const data = [];
     const now = new Date();
-    
+
     for (let i = 11; i >= 0; i--) {
       const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
-      
+
       try {
         const response = await fetch(`/api/finance/transactions?fromDate=${monthStart.toISOString()}&toDate=${monthEnd.toISOString()}`, {
           headers: {
@@ -248,7 +278,7 @@ const Dashboard = () => {
             'Content-Type': 'application/json'
           }
         });
-        
+
         const result = await response.json();
         if (result.success) {
           const stats = calcStats(result.data.transactions, currency);
@@ -269,7 +299,7 @@ const Dashboard = () => {
         });
       }
     }
-    
+
     return data;
   };
 
@@ -300,12 +330,69 @@ const Dashboard = () => {
     const daysDiff = Math.ceil((new Date(current.to).getTime() - currentDate.getTime()) / (1000 * 60 * 60 * 24));
     const prevStart = new Date(currentDate.getTime() - daysDiff * 24 * 60 * 60 * 1000);
     const prevEnd = new Date(prevStart.getTime() + daysDiff * 24 * 60 * 60 * 1000);
-    
+
     return {
       from: prevStart.toISOString(),
       to: prevEnd.toISOString()
     };
   };
+
+  // Handle resend verification email
+  const handleResendVerificationEmail = async () => {
+    try {
+      const response = await resendVerificationEmail();
+      if (response?.success) {
+        if (response.data && response.data.token) {
+          setVerificationLink(
+            `${window.location.origin}/verify-email?token=${response.data.token}`,
+          );
+        }
+        Toaster.success(
+          'Verification email sent! (link displayed below for demo)',
+        );
+      } else {
+        Toaster.error(response?.message || 'Failed to send verification email');
+      }
+    } catch (err) {
+      console.error("Error in handleResendVerificationEmail:", err);
+      Toaster.error('An error occurred while trying to send the verification email.');
+    }
+  };
+
+  // Automatically resend verification email once on initial load if needed
+
+  // Determine verification status
+  const getVerificationStatus = () => {
+    if (!userData) return null;
+
+    // Check if user's identity is already verified
+    if (userData.idVerified || userData.idCheckStatus === 'verified') {
+      return 'verified';
+    }
+
+    // Check if there's verification data
+    if (verificationData?.status) {
+      return verificationData.status;
+    }
+
+    // Check from verification context
+    if (status) {
+      return status;
+    }
+
+    // Check user's idCheckStatus as fallback
+    if (userData.idCheckStatus && userData.idCheckStatus !== 'pending') {
+      return userData.idCheckStatus;
+    }
+
+    return 'not_started';
+  };
+
+  const verificationStatus = getVerificationStatus();
+  const isVerified = verificationStatus === 'verified';
+  const isRejected = verificationStatus === 'rejected' || (rejectedFields && rejectedFields.length > 0);
+  const isPending = verificationStatus === 'pending';
+  const needsVerification = !isVerified && !isRejected && !isPending && verificationStatus === 'not_started';
 
   const periods = [
     { value: 0, label: 'Today' },
@@ -386,6 +473,117 @@ const Dashboard = () => {
         </Menu>
       }
     >
+      {/* Alerts Section */}
+      <div className="mb-6 space-y-4">
+        {/* Email verification alert */}
+        {userData && !userData.emailVerified && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+            <div className="flex">
+              <Mail className="h-5 w-5 text-amber-400 flex-shrink-0" />
+              <div className="ml-3 flex-1">
+                <h3 className="text-sm font-medium text-amber-800">
+                  Email verification required
+                </h3>
+                <p className="mt-2 text-sm text-amber-700">
+                  Please verify your email address to unlock all features.
+                </p>
+
+                {/* Demo verification link */}
+                {verificationLink && (
+                  <div className="mt-2 p-2 bg-amber-100 rounded text-xs break-all overflow-auto">
+                    <p className="text-amber-800 font-medium mb-1">Demo verification link:</p>
+                    <a  // Corrected <a> tag
+                      href={verificationLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-mono text-blue-600 hover:underline"
+                    >
+                      {verificationLink}
+                    </a>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleResendVerificationEmail}
+                  disabled={emailLoading}
+                  className="mt-3 inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium bg-amber-100 text-amber-800 hover:bg-amber-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500 disabled:opacity-50"
+                >
+                  {emailLoading ? (
+                    <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+                  ) : (
+                    <Mail className="h-3 w-3 mr-1" />
+                  )}
+                  {emailLoading ? 'Sending...' : 'Resend verification email'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ID verification alerts */}
+        {isRejected && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <div className="flex">
+              <Shield className="h-5 w-5 text-red-400 flex-shrink-0" />
+              <div className="ml-3 flex-1">
+                <h3 className="text-sm font-medium text-red-800">
+                  Identity verification update required
+                </h3>
+                <p className="mt-2 text-sm text-red-700">
+                  Some of your verification documents were rejected. Please update them.
+                </p>
+                <Link
+                  href="/merchant/verify-identity"
+                  className="mt-3 inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium bg-red-100 text-red-800 hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                >
+                  <Shield className="h-3 w-3 mr-1" />
+                  Update verification
+                </Link>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {isPending && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex">
+              <Shield className="h-5 w-5 text-blue-400 flex-shrink-0" />
+              <div className="ml-3 flex-1">
+                <h3 className="text-sm font-medium text-blue-800">
+                  Identity verification in progress
+                </h3>
+                <p className="mt-2 text-sm text-blue-700">
+                  Your identity verification is in progress. We will notify you when it is complete.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {needsVerification && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex">
+              <Shield className="h-5 w-5 text-blue-400 flex-shrink-0" />
+              <div className="ml-3 flex-1">
+                <h3 className="text-sm font-medium text-blue-800">
+                  Identity verification required
+                </h3>
+                <p className="mt-2 text-sm text-blue-700">
+                  For security reasons, we need to verify your identity before you can access all payment features.
+                </p>
+                <Link
+                  href="/merchant/verify-identity"
+                  className="mt-3 inline-flex items-center px-3 py-1.5 rounded-md text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                >
+                  <Shield className="h-3 w-3 mr-1" />
+                  Start identity verification
+                </Link>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="grid grid-cols-3 gap-6">
         <div className="col-span-3 lg:col-span-2 space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-3 bg-white px-4 py-2 rounded-2xl">
@@ -474,7 +672,7 @@ const Dashboard = () => {
                 <h4 className="text-[#777B84] font-semibold my-1">Total Balance (USD)</h4>
                 <p className="text-xl font-semibold my-2">{formatCurrency(balances?.USD?.totalBalance || 0, 'USD')}</p>
                 <p className="text-[#BEBEBE] my-1 truncate overflow-hidden whitespace-nowrap text-sm">
-                Total Balance in USD
+                  Total Balance in USD
                 </p>
               </div>
               <Link
@@ -492,7 +690,7 @@ const Dashboard = () => {
                 <h4 className="text-[#777B84] font-semibold my-1">Total Balance (BRL)</h4>
                 <p className="text-xl font-semibold my-2">{formatCurrency(balances?.BRL?.totalBalance || 0, 'BRL')}</p>
                 <p className="text-[#BEBEBE] my-1 truncate overflow-hidden whitespace-nowrap text-sm">
-                Total Balance in BRL
+                  Total Balance in BRL
                 </p>
               </div>
               <Link

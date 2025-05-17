@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { ToastContainer } from 'react-toastify';
 import { Geist, Geist_Mono } from 'next/font/google';
+import { VerificationProvider } from '@/context/VerificationContext';
 
 import './globals.css';
 import 'react-loading-skeleton/dist/skeleton.css';
@@ -29,7 +30,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        {children}
+        <VerificationProvider>
+          {children}
+        </VerificationProvider>
         <ToastContainer 
           position="top-right"
           autoClose={5000}

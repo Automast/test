@@ -160,16 +160,14 @@ const FinancePage = () => {
   useEffect(() => {
     if (balanceError) {
       console.error('Error fetching balance data:', balanceError);
-      // Ensure Toaster.error receives a string
-      const errorMessage = typeof balanceError === 'string' ? balanceError : (balanceError as Error)?.message || 'Failed to load balance data';
-      Toaster.error(errorMessage);
+      Toaster.error('Failed to load balance data');
     }
   }, [balanceError]);
 
-  // Fetch payouts data (sendPayoutRequest was called here, assuming it's for fetching)
+  // Mock payouts data
   useEffect(() => {
     sendPayoutRequest();
-  }, [period, currentPage, sendPayoutRequest]); // Added sendPayoutRequest to dependency array
+  }, [period, currentPage]);
 
   useEffect(() => {
     if (payoutResponse) {
@@ -180,8 +178,7 @@ const FinancePage = () => {
 
   useEffect(() => {
     if (payoutError) {
-      // **FIXED LINE BELOW**
-      Toaster.error(payoutError.message || 'An unexpected payout error occurred.');
+      Toaster.error(payoutError?.message);
 
       // mock data instead: remove this code in production mode
       setPayoutData(payoutDataMock);
@@ -324,7 +321,7 @@ const FinancePage = () => {
           </Menu>
         </div>
 
-        <div className="h-12 bg-gray-100 -mx-4" style={{ width: 'calc(100% + 2rem)' }} /> {/* Assuming --spacing is 0.25rem and used 8 times for -mx-4 (0.25*8 = 2rem). Adjust if your --spacing variable is different. */}
+        <div className="h-12 bg-gray-100 -mx-4" style={{ width: 'calc(100% + var(--spacing) * 8)' }} />
         <div className="max-w-full overflow-auto -mt-12">
           <table className="table-auto w-full">
             <thead className="bg-gray-100 text-xs font-semibold text-gray-700 mb-2">
@@ -359,7 +356,7 @@ const FinancePage = () => {
             <tbody className="text-sm">
               {payoutLoading && (
                 <tr>
-                  <td colSpan={5} className="text-center p-6"> {/* Adjusted colSpan to 5 */}
+                  <td colSpan={8} className="text-center p-6">
                     Loading Payouts History...
                   </td>
                 </tr>
@@ -368,12 +365,12 @@ const FinancePage = () => {
                 payoutData?.data?.length > 0 &&
                 payoutData?.data.map((t, i) => (
                   <tr
-                    key={t.id || i} // Use t.id if available and unique, fallback to index
+                    key={i}
                     className="h-10 hover:bg-gray-50 cursor-pointer"
                     onClick={() => router.push(`/merchant/finance/payouts?id=${t.id}`)}
                   >
                     <td className="p-2 whitespace-nowrap border-b border-b-gray-200">
-                      {new Date(t.createdAt).toLocaleString('en-US', { // Ensure t.createdAt is a valid date string or number
+                      {t.createdAt.toLocaleString('en-US', {
                         month: 'short',
                         day: 'numeric',
                         year: 'numeric',
@@ -396,7 +393,7 @@ const FinancePage = () => {
                 ))}
               {!payoutLoading && payoutData?.data?.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="text-center p-6"> {/* Adjusted colSpan to 5 */}
+                  <td colSpan={8} className="text-center p-6">
                     No Payout History
                   </td>
                 </tr>
@@ -447,8 +444,8 @@ const FinancePage = () => {
               <div>
                 <label className="block text-sm mb-1">Withdraw Method</label>
                 <div className="w-full">
-                  <select
-                    value={withdrawMethod}
+                  <select 
+                    value={withdrawMethod} 
                     onChange={(e) => setWithdrawMethod(e.target.value)}
                     className="w-full border border-gray-200 rounded-md px-4 py-2 text-sm text-gray-500 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
@@ -464,7 +461,7 @@ const FinancePage = () => {
               <div>
                 <label className="block text-sm mb-1">Amount</label>
                 <input
-                  type="text" // Consider type="number" for amounts, with appropriate validation
+                  type="text"
                   placeholder="Enter Amount"
                   className="w-full border border-gray-200 rounded-md px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   value={withdrawAmount}
@@ -475,9 +472,7 @@ const FinancePage = () => {
                 After confirm, you concern you are requesting to deposit that amount to this bank account/wallet
               </div>
               <div className="grid grid-cols-2 gap-4 pt-6">
-                <button
-                  onClick={() => setShowWithdrawModal(false)}
-                  className="bg-blue-50 text-blue-500 font-semibold py-2 rounded-md hover:bg-blue-100 transition cursor-pointer">
+                <button className="bg-blue-50 text-blue-500 font-semibold py-2 rounded-md hover:bg-blue-100  transition cursor-pointer">
                   Cancel
                 </button>
                 <button
@@ -498,17 +493,17 @@ const FinancePage = () => {
       {showOTPModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-[#0008]"
-          onKeyDown={async (e) => { // This onKeyDown should ideally be on an input or a more specific focusable element
+          onKeyDown={async (e) => {
             if (showOTPModal) {
               if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
                 const text = await navigator.clipboard.readText();
-                setOTP(text.slice(0, 6)); // Ensure OTP is not longer than 6 chars
+                setOTP(text);
               }
             }
           }}
         >
-          <div className="bg-white p-6 rounded-lg w-full max-w-md space-y-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex text-center items-center pb-4 font-semibold text-xl justify-center"> {/* Added justify-center */}
+          <div className="bg-white p-6 rounded-lg w-full max-w-md space-y-4">
+            <div className="flex text-center items-center pb-4 font-semibold text-xl">
               Sent a verification code on your registered email
             </div>
             <div className="flex items-center justify-center text-center text-gray-500 text-sm">
@@ -519,29 +514,13 @@ const FinancePage = () => {
                 OTP
               </div>
               <div className="flex gap-2 justify-center items-center">
-                {Array.from({ length: 6 }, (_, i) => i).map((index) => ( // Changed _ to index for clarity
+                {Array.from({ length: 6 }, (_, i) => i).map((_, i) => (
                   <input
-                    // Consider making these inputs manageable for typing and pasting
+                    readOnly
                     type="text"
-                    maxLength={1} // Allow only one character per input
-                    key={index}
-                    id={`otp-input-${index}`} // For better accessibility and targeting
+                    key={i}
                     className="border border-gray-400 rounded-md p-2 w-12 h-12 text-xl font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 text-center"
-                    value={otp[index] ?? ''}
-                    onChange={(e) => {
-                      const newOtp = otp.split('');
-                      newOtp[index] = e.target.value;
-                      setOTP(newOtp.join('').slice(0, 6));
-                      // Focus next input
-                      if (e.target.value && index < 5) {
-                        document.getElementById(`otp-input-${index + 1}`)?.focus();
-                      }
-                    }}
-                    onKeyDown={(e) => { // Handle backspace
-                        if (e.key === 'Backspace' && !otp[index] && index > 0) {
-                            document.getElementById(`otp-input-${index - 1}`)?.focus();
-                        }
-                    }}
+                    value={otp[i] ?? ''}
                   />
                 ))}
               </div>
@@ -549,9 +528,7 @@ const FinancePage = () => {
                 You can copy OTP code from your email to any inputs in the above.
               </div>
               <div className="grid grid-cols-2 gap-4 pt-6">
-                <button
-                  onClick={() => { setShowOTPModal(false); setShowWithdrawModal(true); }} // Go back to withdraw modal
-                  className="bg-blue-50 text-blue-500 font-semibold py-2 rounded-md hover:bg-blue-100 transition cursor-pointer">
+                <button className="bg-blue-50 text-blue-500 font-semibold py-2 rounded-md hover:bg-blue-100  transition cursor-pointer">
                   Back
                 </button>
                 <button
@@ -570,12 +547,12 @@ const FinancePage = () => {
         </div>
       )}
       {showSuccessModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0008]" onClick={() => setShowSuccessModal(false)}>
-          <div className="bg-white p-6 rounded-lg w-full max-w-md space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0008]">
+          <div className="bg-white p-6 rounded-lg w-full max-w-md space-y-4">
             <div className="flex text-center justify-center items-center pt-4 font-semibold text-xl">
-              <span className="text-green-600 text-3xl">✓</span> {/* Made checkmark larger */}
+              <span className="text-green-600">✓</span>
             </div>
-            <div className="flex text-center justify-center items-center pb-4 font-semibold text-xl"> {/* Added justify-center */}
+            <div className="flex text-center items-center pb-4 font-semibold text-xl">
               You have successfully withdrawn your balance
             </div>
             <div className="flex items-center justify-center text-center text-gray-500 text-sm">

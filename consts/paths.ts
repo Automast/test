@@ -4,11 +4,17 @@ export const apiBaseUrl = `${process.env.NEXT_PUBLIC_API_URL}`;
 export const signupUrl = `/auth/register`;
 export const signinUrl = `/auth/login`;
 export const meUrl = `/auth/me`;
+export const sendVerificationEmailUrl = `/auth/send-verification-email`;
+export const verifyEmailUrl = `/auth/verify-email`;
 
 // onboarding
 export const onboardingBusinessUrl = `/onboarding/business`;
 export const onboardingAddressUrl = `/onboarding/address`;
 export const onboardingSellingUrl = `/onboarding/selling-method`;
+
+// verification
+export const verificationStatusUrl = `/verification/status`;
+export const verificationSubmitUrl = `/verification/submit`;
 
 // notifications
 export const notiUrl = `/notifications`;

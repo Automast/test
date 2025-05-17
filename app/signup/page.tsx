@@ -9,6 +9,7 @@ import { useForm } from 'react-hook-form';
 import { signupSchema, type SignupFormData } from '@/lib/schemas/onboarding-schemas';
 import { useOnboardingStore } from '@/lib/store/onboarding-store';
 import { signupUrl } from '@/consts/paths';
+import { sendVerificationEmailUrl } from '@/consts/paths';import { useApiRequest } from '@/hooks/useApiRequest';
 import logoImg from '@/assets/images/logo.svg';
 import { Loader2, Eye, EyeOff, Shield, Zap, Globe, DollarSign, CheckCircle, TrendingUp } from 'lucide-react';
 
@@ -18,6 +19,12 @@ export default function SignupPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  // Initialize the resend hook
+  const { sendRequest: resendVerificationEmail } = useApiRequest({
+    endpoint: sendVerificationEmailUrl,
+    method: 'POST',
+  });
 
   // Check if user is already logged in
   useEffect(() => {
@@ -67,11 +74,11 @@ export default function SignupPage() {
 
   const onSubmit = async (data: SignupFormData) => {
     setIsLoading(true);
-    
+
     try {
       // Clear any existing onboarding data before starting fresh
       clearData();
-      
+
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}${signupUrl}`, {
         method: 'POST',
         headers: {
@@ -89,13 +96,13 @@ export default function SignupPage() {
         // Store the token in both localStorage and as a cookie for middleware
         localStorage.setItem('jwt_token', result.data.token);
         localStorage.setItem('user_data', JSON.stringify(result.data.user));
-        
+
         // Set cookie for middleware
         document.cookie = `token=${result.data.token}; path=/; max-age=86400; secure; samesite=lax`;
-        
+
         // Set onboarding stage to business (first step after signup)
         setStage('business');
-        
+        await resendVerificationEmail();
         // Redirect to onboarding
         router.push('/onboarding/business');
       } else {
