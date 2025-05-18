@@ -9,7 +9,6 @@ import { CheckCircle, XCircle, Loader, ArrowLeft } from 'lucide-react';
 import { useApiRequest } from '@/hooks';
 import { verifyEmailUrl } from '@/consts/paths';
 import Toaster from '@/helpers/Toaster';
-
 // This component contains the original logic and uses useSearchParams
 function VerifyEmailContent() {
   const router = useRouter();
