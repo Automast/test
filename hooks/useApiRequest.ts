@@ -65,6 +65,7 @@ export const useApiRequest = <T extends { message?: string; data?: any; [key: st
     try {
       const res: AxiosResponse<T> = await axios(config);
       setResponse(res.data);
+return res.data;
     } catch (err: any) {
       if (axios.isAxiosError(err)) {
         setError(err.response?.data ?? err);
