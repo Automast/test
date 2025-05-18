@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Verify-Email Token Tester</title>
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: 2rem auto; }
+    .status { margin-bottom: 1rem; padding: 0.5rem; background: #f0f0f0; }
+    input, button { padding: 0.5rem; margin: 0.5rem 0; width: 100%; box-sizing: border-box; }
+    pre { background: #eee; padding: 1rem; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Verify-Email Token Tester</h1>
+
+  <div id="loginStatus" class="status">Checking login status…</div>
+
+  <button id="requestEmail" disabled>Request Verification Token</button>
+
+  <h2>Response</h2>
+  <pre id="output">—</pre>
+
+  <script>
+    const API_BASE = 'https://gatewaymvp-production.up.railway.app';
+    const ME_URL   = `${API_BASE}/api/auth/me`;
+    const SEND_URL = `${API_BASE}/api/auth/send-verification-email`;
+
+    async function checkLogin() {
+      const statusEl = document.getElementById('loginStatus');
+      try {
+        const res = await fetch(ME_URL, { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          const user = data.user || data;  // adjust based on your shape
+          statusEl.textContent = `✅ Logged in as: ${user.email || user.username || JSON.stringify(user)}`;
+          document.getElementById('requestEmail').disabled = false;
+        } else {
+          statusEl.textContent = `❌ Not logged in (status ${res.status}). Please sign in at your app first.`;
+        }
+      } catch (err) {
+        statusEl.textContent = `🚨 Error checking login: ${err.message}`;
+      }
+    }
+
+    document.getElementById('requestEmail').addEventListener('click', async () => {
+      const out = document.getElementById('output');
+      out.textContent = '⏳ Sending request…';
+
+      try {
+        const res = await fetch(SEND_URL, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})  // if your endpoint expects extra data, add it here
+        });
+
+        const text = await res.text();
+        try {
+          out.textContent = JSON.stringify(JSON.parse(text), null, 2);
+        } catch {
+          out.textContent = text;
+        }
+      } catch (err) {
+        out.textContent = '🚨 Network/CORS error: ' + err.message;
+      }
+    });
+
+    // Kick off the login check as soon as the page loads
+    window.addEventListener('load', checkLogin);
+  </script>
+</body>
+</html>
