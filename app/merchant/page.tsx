@@ -3,10 +3,11 @@
 import React, { useState, useEffect } from 'react';
 import { XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area, CartesianGrid } from 'recharts';
 import { DashLayout } from '@/components/layouts';
-import { ListFilter, AlertTriangle, Mail, Shield, RefreshCw } from 'lucide-react';
+import { ListFilter, AlertTriangle, Mail, Shield, RefreshCw } from 'lucide-react'; // Removed ArrowLeft as it's not used
 import { CircularProgressbar, buildStyles } from 'react-circular-progressbar';
 import { useVerification } from '@/context/VerificationContext';
 import { useApiRequest } from '@/hooks';
+import { sendVerificationEmailUrl } from '@/consts/paths';
 import Toaster from '@/helpers/Toaster';
 
 import 'react-circular-progressbar/dist/styles.css';
@@ -14,15 +15,12 @@ import '@/assets/styles/dashboard.css';
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
 import Link from 'next/link';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'https://gatewaymvp-production.up.railway.app';
-const ME_URL = `${API_BASE}/api/auth/me`;
-const SEND_VERIFICATION_EMAIL_URL = `${API_BASE}/api/auth/send-verification-email`;
-
-const CustomTooltip: React.FC<{
-  payload?: Array<{ payload: { value: number | string } }>;
-  label?: string;
-}> = ({ payload, label }) => {
+const CustomTooltip: React.FC<{ payload?: Array<{ payload: { value: number | string } }>; label?: string }> = ({
+  payload,
+  label,
+}) => {
   if (!payload || payload.length === 0) return null;
+
   const data = payload[0].payload;
   return (
     <div style={{ backgroundColor: 'black', color: 'white', padding: '10px', borderRadius: '5px' }}>
@@ -32,8 +30,8 @@ const CustomTooltip: React.FC<{
   );
 };
 
-const Dashboard: React.FC = () => {
-  const [period, setPeriod] = useState<number>(0);
+const Dashboard = () => {
+  const [period, setPeriod] = useState<number>(0); // 0 = today, 1 = yesterday, 7 = week, etc.
   const [userData, setUserData] = useState<any>(null);
   const [merchantData, setMerchantData] = useState<any>(null);
   const [balances, setBalances] = useState<any>(null);
@@ -42,30 +40,50 @@ const Dashboard: React.FC = () => {
   const [orderStatus, setOrderStatus] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [dashboardCurrency, setDashboardCurrency] = useState<string>('USD');
-  const [isClient, setIsClient] = useState<boolean>(false);
+  const [isClient, setIsClient] = useState(false);
   const [verificationLink, setVerificationLink] = useState<string | null>(null);
+  const [initialEmailResent, setInitialEmailResent] = useState(false);
 
-  const { fetchStatus, status, rejectedFields, verificationData } = useVerification();
+  // Verification context
+  const {
+    fetchStatus,
+    status,
+    rejectedFields,
+    verificationData
+  } = useVerification();
 
+  // Email verification
   const { sendRequest: resendVerificationEmail, loading: emailLoading } = useApiRequest({
-    endpoint: SEND_VERIFICATION_EMAIL_URL,
+    endpoint: sendVerificationEmailUrl,
     method: 'POST',
   });
 
+  const formatter = new Intl.NumberFormat('en-US', {
+    style: 'decimal',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+  // Check if we're on the client side
   useEffect(() => {
     setIsClient(true);
   }, []);
 
+  // Authentication check and load dashboard
   useEffect(() => {
-    if (!isClient) return;
-    const token = localStorage.getItem('jwt_token');
-    if (!token) {
-      window.location.href = '/signin';
-      return;
+    if (isClient) {
+      if (typeof window !== 'undefined') {
+        const token = localStorage.getItem('jwt_token');
+        if (!token) {
+          window.location.href = '/signin';
+          return;
+        }
+        loadDashboard();
+      }
     }
-    loadDashboard();
   }, [period, isClient]);
 
+  // Initialize verification context
   useEffect(() => {
     if (isClient && userData) {
       fetchStatus();
@@ -73,68 +91,114 @@ const Dashboard: React.FC = () => {
   }, [isClient, userData, fetchStatus]);
 
   const loadDashboard = async () => {
-    setLoading(true);
-    try {
-      const token = localStorage.getItem('jwt_token')!;
+    if (typeof window === 'undefined') return;
 
-      // 1. Get user and merchant info
-      const meRes = await fetch(ME_URL, {
-        method: 'GET',
+    try {
+      setLoading(true);
+      const token = localStorage.getItem('jwt_token');
+
+      if (!token) {
+        window.location.href = '/signin';
+        return;
+      }
+
+      // 1. Get user and merchant info using the correct endpoint
+      const meResponse = await fetch('/api/auth/me', {
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+          'Content-Type': 'application/json'
+        }
       });
-      if (meRes.status === 401) {
+
+      if (meResponse.status === 401) {
         localStorage.removeItem('jwt_token');
         localStorage.removeItem('user_data');
         window.location.href = '/signin';
         return;
       }
-      const meJson = await meRes.json();
-      const { user, merchant } = meJson.data;
+
+      const meData = await meResponse.json();
+      if (!meData.success) {
+        throw new Error('Failed to load user data');
+      }
+
+      const { user, merchant } = meData.data;
       setUserData(user);
       setMerchantData(merchant);
-      localStorage.setItem('user_data', JSON.stringify(merchant));
-      setDashboardCurrency(merchant.country === 'BR' ? 'BRL' : 'USD');
 
-      // 2. Compute date ranges
+      // Store user data in localStorage for verification page
+      localStorage.setItem('user_data', JSON.stringify(merchant));
+
+      // Determine dashboard currency based on merchant country
+      const isBrazil = merchant.country === 'BR';
+      const dashCur = isBrazil ? 'BRL' : 'USD';
+      setDashboardCurrency(dashCur);
+
+      // 2. Get date ranges for current and previous periods
       const rangeNow = getDateRange(period);
       const rangePrev = getPreviousDateRange(period, rangeNow);
 
-      // 3. Fetch balances & transactions
-      const [balRes, txNowRes, txPrevRes] = await Promise.all([
-        fetch(`${API_BASE}/api/finance/balance`, {
-          method: 'GET',
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      // 3. Fetch balance and transaction data in parallel
+      const [balanceResponse, txNowResponse, txPrevResponse] = await Promise.all([
+        fetch('/api/finance/balance', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
         }),
-        fetch(`${API_BASE}/api/finance/transactions?fromDate=${encodeURIComponent(rangeNow.from)}&toDate=${encodeURIComponent(rangeNow.to)}`, {
-          method: 'GET',
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        fetch(`/api/finance/transactions?fromDate=${encodeURIComponent(rangeNow.from)}&toDate=${encodeURIComponent(rangeNow.to)}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
         }),
-        fetch(`${API_BASE}/api/finance/transactions?fromDate=${encodeURIComponent(rangePrev.from)}&toDate=${encodeURIComponent(rangePrev.to)}`, {
-          method: 'GET',
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        fetch(`/api/finance/transactions?fromDate=${encodeURIComponent(rangePrev.from)}&toDate=${encodeURIComponent(rangePrev.to)}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
         })
       ]);
-      const balJson = await balRes.json();
-      const txNowJson = await txNowRes.json();
-      const txPrevJson = await txPrevRes.json();
-      if (balJson.success) setBalances(balJson.data.balances);
 
-      // Calculate stats
-      const statsNow = calcStats(txNowJson.data.transactions, dashboardCurrency);
-      const statsPrev = calcStats(txPrevJson.data.transactions, dashboardCurrency);
+      const balanceData = await balanceResponse.json();
+      const txNowData = await txNowResponse.json();
+      const txPrevData = await txPrevResponse.json();
+
+      // Set balances
+      if (balanceData.success) {
+        setBalances(balanceData.data.balances);
+      }
+
+      // Process transaction data for metrics
+      const txNow = txNowData.success ? txNowData.data.transactions : [];
+      const txPrev = txPrevData.success ? txPrevData.data.transactions : [];
+
+      const statsNow = calcStats(txNow, dashCur);
+      const statsPrev = calcStats(txPrev, dashCur);
+
       setOrderOverview({
-        gross: { amount: statsNow.gross, delta: percentChange(statsNow.gross, statsPrev.gross) },
-        paidOrder: { amount: statsNow.paid, delta: percentChange(statsNow.paid, statsPrev.paid) },
-        averageSucceedOrder: { amount: statsNow.acceptance, delta: percentChange(statsNow.acceptance, statsPrev.acceptance) },
+        gross: {
+          amount: statsNow.gross,
+          delta: percentChange(statsNow.gross, statsPrev.gross)
+        },
+        paidOrder: {
+          amount: statsNow.paid,
+          delta: percentChange(statsNow.paid, statsPrev.paid)
+        },
+        averageSucceedOrder: {
+          amount: statsNow.acceptance,
+          delta: percentChange(statsNow.acceptance, statsPrev.acceptance)
+        }
       });
-      setOrderStatus(calcOrderStatus(txNowJson.data.transactions));
 
-      // Sales chart data
-      const chart = await generateSalesData(token, dashboardCurrency);
-      setSalesData(chart);
+      // Calculate order status
+      const orderStatusData = calcOrderStatus(txNow);
+      setOrderStatus(orderStatusData);
+
+      // Generate sales chart data (last 12 months)
+      const chartData = await generateSalesData(token, dashCur);
+      setSalesData(chartData);
+
     } catch (error) {
       console.error('Dashboard load error:', error);
     } finally {
@@ -143,29 +207,52 @@ const Dashboard: React.FC = () => {
   };
 
   const calcStats = (txs: any[], currency: string) => {
-    let gross = 0, paid = 0, tries = 0, success = 0;
+    let gross = 0, paid = 0, cardTry = 0, cardOk = 0;
+
     txs.forEach(tx => {
       if (tx.payment_method === 'card') {
-        tries++;
-        if (isSuccess(tx)) success++;
+        cardTry++;
+        if (isSuccess(tx)) cardOk++;
       }
       if (isSuccess(tx)) {
         paid++;
-        gross += currency === 'USD' ? (tx.amount_usd ?? 0) : (tx.amount_brl ?? 0);
+        // Use the correct currency field based on dashboard currency
+        gross += currency === 'USD'
+          ? (tx.amount_usd ?? tx.amount ?? 0)
+          : (tx.amount_brl ?? tx.amount ?? 0);
       }
     });
-    return { gross, paid, acceptance: tries ? (success / tries) * 100 : 0 };
+
+    return {
+      gross,
+      paid,
+      acceptance: cardTry ? (cardOk / cardTry * 100) : 0
+    };
   };
 
   const calcOrderStatus = (txs: any[]) => {
-    const total = txs.length;
-    const paid = txs.filter(isSuccess).length;
-    const chargeback = txs.filter(tx => tx.status === 'chargeback').length;
-    const refunded = txs.filter(tx => tx.status === 'refunded').length;
+    let total = txs.length;
+    let paid = 0, chargeback = 0, refunded = 0;
+
+    txs.forEach(tx => {
+      if (isSuccess(tx)) paid++;
+      else if (tx.status === 'chargeback') chargeback++;
+      else if (tx.status === 'refunded') refunded++;
+    });
+
     return {
-      paid:    { amount: paid, percent: total ? Math.round((paid / total) * 100) : 0 },
-      chargeback: { amount: chargeback, percent: total ? Math.round((chargeback / total) * 100) : 0 },
-      refunded:   { amount: refunded, percent: total ? Math.round((refunded / total) * 100) : 0 },
+      paid: {
+        amount: paid,
+        percent: total ? Math.round((paid / total) * 100) : 0
+      },
+      chargeback: {
+        amount: chargeback,
+        percent: total ? Math.round((chargeback / total) * 100) : 0
+      },
+      refunded: {
+        amount: refunded,
+        percent: total ? Math.round((refunded / total) * 100) : 0
+      }
     };
   };
 
@@ -177,87 +264,133 @@ const Dashboard: React.FC = () => {
   };
 
   const generateSalesData = async (token: string, currency: string) => {
+    const data = [];
     const now = new Date();
-    const data: any[] = [];
+
     for (let i = 11; i >= 0; i--) {
-      const start = new Date(now.getFullYear(), now.getMonth() - i, 1).toISOString();
-      const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 0).toISOString();
+      const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+
       try {
-        const res = await fetch(`${API_BASE}/api/finance/transactions?fromDate=${start}&toDate=${end}`, {
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+        const response = await fetch(`/api/finance/transactions?fromDate=${monthStart.toISOString()}&toDate=${monthEnd.toISOString()}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
         });
-        const json = await res.json();
-        const stats = json.success ? calcStats(json.data.transactions, currency) : { gross: 0 };
-        data.push({ month: new Date(start).toLocaleDateString('en-US', { month: 'short' }), value: stats.gross });
-      } catch {
-        data.push({ month: new Date(start).toLocaleDateString('en-US', { month: 'short' }), value: 0 });
+
+        const result = await response.json();
+        if (result.success) {
+          const stats = calcStats(result.data.transactions, currency);
+          data.push({
+            month: monthStart.toLocaleDateString('en-US', { month: 'short' }),
+            value: stats.gross
+          });
+        } else {
+          data.push({
+            month: monthStart.toLocaleDateString('en-US', { month: 'short' }),
+            value: 0
+          });
+        }
+      } catch (error) {
+        data.push({
+          month: monthStart.toLocaleDateString('en-US', { month: 'short' }),
+          value: 0
+        });
       }
     }
+
     return data;
   };
 
   const getDateRange = (filter: number) => {
     const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const iso = (d: Date) => d.toISOString();
+
     switch (filter) {
-      case 0:
-        return { from: iso(startOfDay), to: iso(new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000)) };
-      case 1:
-        return {
-          from: iso(new Date(startOfDay.getTime() - 24 * 60 * 60 * 1000)),
-          to:   iso(startOfDay)
-        };
-      case 7:
-        return {
-          from: iso(new Date(startOfDay.getTime() - 7 * 24 * 60 * 60 * 1000)),
-          to:   iso(new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000))
-        };
-      case 30:
-        return {
-          from: iso(new Date(startOfDay.getTime() - 30 * 24 * 60 * 60 * 1000)),
-          to:   iso(new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000))
-        };
+      case 0: // today
+        return { from: iso(today), to: iso(new Date(today.getTime() + 24 * 60 * 60 * 1000)) };
+      case 1: // yesterday
+        const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+        return { from: iso(yesterday), to: iso(today) };
+      case 7: // last 7 days
+        const week = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+        return { from: iso(week), to: iso(new Date(today.getTime() + 24 * 60 * 60 * 1000)) };
+      case 30: // last 30 days
+        const month = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+        return { from: iso(month), to: iso(new Date(today.getTime() + 24 * 60 * 60 * 1000)) };
       default:
-        return { from: iso(startOfDay), to: iso(new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000)) };
+        return { from: iso(today), to: iso(new Date(today.getTime() + 24 * 60 * 60 * 1000)) };
     }
   };
 
-  const getPreviousDateRange = (filter: number, current: { from: string; to: string }) => {
-    const from = new Date(current.from);
-    const to = new Date(current.to);
-    const days = (to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24);
-    const prevFrom = new Date(from.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
-    const prevTo   = new Date(new Date(prevFrom).getTime() + days * 24 * 60 * 60 * 1000).toISOString();
-    return { from: prevFrom, to: prevTo };
+  const getPreviousDateRange = (filter: number, current: any) => {
+    const currentDate = new Date(current.from);
+    const daysDiff = Math.ceil((new Date(current.to).getTime() - currentDate.getTime()) / (1000 * 60 * 60 * 24));
+    const prevStart = new Date(currentDate.getTime() - daysDiff * 24 * 60 * 60 * 1000);
+    const prevEnd = new Date(prevStart.getTime() + daysDiff * 24 * 60 * 60 * 1000);
+
+    return {
+      from: prevStart.toISOString(),
+      to: prevEnd.toISOString()
+    };
   };
 
+  // Handle resend verification email
   const handleResendVerificationEmail = async () => {
     try {
       const response = await resendVerificationEmail();
-      if (response.success && response.data.token) {
-        setVerificationLink(`${window.location.origin}/verify-email?token=${response.data.token}`);
-        Toaster.success('Verification email sent! (link displayed below for demo)');
+      if (response?.success) {
+        if (response.data && response.data.token) {
+          setVerificationLink(
+            `${window.location.origin}/verify-email?token=${response.data.token}`,
+          );
+        }
+        Toaster.success(
+          'Verification email sent! (link displayed below for demo)',
+        );
       } else {
-        Toaster.error(response.message || 'Failed to send verification email');
+        Toaster.error(response?.message || 'Failed to send verification email');
       }
-    } catch {
-      Toaster.error('An error occurred while sending verification email.');
+    } catch (err) {
+      console.error("Error in handleResendVerificationEmail:", err);
+      Toaster.error('An error occurred while trying to send the verification email.');
     }
   };
 
+  // Automatically resend verification email once on initial load if needed
+
+  // Determine verification status
   const getVerificationStatus = () => {
     if (!userData) return null;
-    if (userData.idVerified || userData.idCheckStatus === 'verified') return 'verified';
-    if (verificationData?.status) return verificationData.status;
-    if (status) return status;
-    if (userData.idCheckStatus && userData.idCheckStatus !== 'pending') return userData.idCheckStatus;
+
+    // Check if user's identity is already verified
+    if (userData.idVerified || userData.idCheckStatus === 'verified') {
+      return 'verified';
+    }
+
+    // Check if there's verification data
+    if (verificationData?.status) {
+      return verificationData.status;
+    }
+
+    // Check from verification context
+    if (status) {
+      return status;
+    }
+
+    // Check user's idCheckStatus as fallback
+    if (userData.idCheckStatus && userData.idCheckStatus !== 'pending') {
+      return userData.idCheckStatus;
+    }
+
     return 'not_started';
   };
 
   const verificationStatus = getVerificationStatus();
   const isVerified = verificationStatus === 'verified';
-  const isRejected = verificationStatus === 'rejected' || (rejectedFields?.length ?? 0) > 0;
+  const isRejected = verificationStatus === 'rejected' || (rejectedFields && rejectedFields.length > 0);
   const isPending = verificationStatus === 'pending';
   const needsVerification = !isVerified && !isRejected && !isPending && verificationStatus === 'not_started';
 
@@ -283,7 +416,11 @@ const Dashboard: React.FC = () => {
     return `${arrow} ${Math.abs(value)}%`;
   };
 
-  if (!isClient) return null;
+  // Don't render anything until we're on the client side
+  if (!isClient) {
+    return null;
+  }
+
   if (loading) {
     return (
       <DashLayout titleArea={<h2 className="text-xl font-semibold">Loading...</h2>}>
@@ -336,7 +473,9 @@ const Dashboard: React.FC = () => {
         </Menu>
       }
     >
+      {/* Alerts Section */}
       <div className="mb-6 space-y-4">
+        {/* Email verification alert */}
         {userData && !userData.emailVerified && (
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
             <div className="flex">
@@ -348,10 +487,12 @@ const Dashboard: React.FC = () => {
                 <p className="mt-2 text-sm text-amber-700">
                   Please verify your email address to unlock all features.
                 </p>
+
+                {/* Demo verification link */}
                 {verificationLink && (
                   <div className="mt-2 p-2 bg-amber-100 rounded text-xs break-all overflow-auto">
                     <p className="text-amber-800 font-medium mb-1">Demo verification link:</p>
-                    <a
+                    <a  // Corrected <a> tag
                       href={verificationLink}
                       target="_blank"
                       rel="noopener noreferrer"
@@ -361,6 +502,7 @@ const Dashboard: React.FC = () => {
                     </a>
                   </div>
                 )}
+
                 <button
                   onClick={handleResendVerificationEmail}
                   disabled={emailLoading}
@@ -378,6 +520,7 @@ const Dashboard: React.FC = () => {
           </div>
         )}
 
+        {/* ID verification alerts */}
         {isRejected && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-4">
             <div className="flex">
@@ -490,7 +633,7 @@ const Dashboard: React.FC = () => {
               </div>
             </div>
           </div>
-
+          {/* Sale Overview*/}
           <div className="bg-white p-6 rounded-2xl">
             <h4 className="font-semibold mb-2 text-[#777B84] text-xl">Sales Overview</h4>
             <p className="text-sm text-[#BEBEBE] mb-4">Track your company daily volume</p>
@@ -508,7 +651,10 @@ const Dashboard: React.FC = () => {
                   stroke="#9FA6B2"
                   tickLine={false}
                   axisLine={false}
-                  tickFormatter={(value) => { if (value === 0) return value; return dashboardCurrency === 'BRL' ? `R$ ${value}` : `$ ${value}`; }}
+                  tickFormatter={(value) => {
+                    if (value === 0) return value;
+                    return dashboardCurrency === 'BRL' ? `R$ ${value}` : `$ ${value}`;
+                  }}
                   tick={{ fontSize: 12 }}
                 />
                 <CartesianGrid stroke="#D2D6DC33" vertical={false} />
@@ -518,35 +664,50 @@ const Dashboard: React.FC = () => {
             </ResponsiveContainer>
           </div>
         </div>
-
         <div className="col-span-3 lg:col-span-1 space-y-4 w-full text-sm text-black">
+          {/* Balance Section */}
           <div className="p-4 bg-white rounded-xl space-y-4">
             <div className="flex justify-between items-start">
               <div>
                 <h4 className="text-[#777B84] font-semibold my-1">Total Balance (USD)</h4>
                 <p className="text-xl font-semibold my-2">{formatCurrency(balances?.USD?.totalBalance || 0, 'USD')}</p>
-                <p className="text-[#BEBEBE] my-1 truncate overflow-hidden whitespace-nowrap text-sm">Total Balance in USD</p>
+                <p className="text-[#BEBEBE] my-1 truncate overflow-hidden whitespace-nowrap text-sm">
+                  Total Balance in USD
+                </p>
               </div>
-              <Link href="/merchant/finance" className="font-normal text-gray-600 hover:underline truncate overflow-hidden whitespace-nowrap">
+              <Link
+                href="/merchant/finance"
+                className="font-normal text-gray-600 hover:underline truncate overflow-hidden whitespace-nowrap"
+              >
                 See Details
               </Link>
             </div>
+
             <hr className="border-gray-200" />
+
             <div className="flex justify-between items-start">
               <div>
                 <h4 className="text-[#777B84] font-semibold my-1">Total Balance (BRL)</h4>
                 <p className="text-xl font-semibold my-2">{formatCurrency(balances?.BRL?.totalBalance || 0, 'BRL')}</p>
-                <p className="text-[#BEBEBE] my-1 truncate overflow-hidden whitespace-nowrap text-sm">Total Balance in BRL</p>
+                <p className="text-[#BEBEBE] my-1 truncate overflow-hidden whitespace-nowrap text-sm">
+                  Total Balance in BRL
+                </p>
               </div>
-              <Link href="/merchant/finance" className="font-normal text-gray-600 hover:underline truncate overflow-hidden whitespace-nowrap">
+              <Link
+                href="/merchant/finance"
+                className="font-normal text-gray-600 hover:underline truncate overflow-hidden whitespace-nowrap"
+              >
                 See Details
               </Link>
             </div>
           </div>
 
+          {/* Account Status Section */}
           <div className="p-4 bg-white rounded-xl">
             <h4 className="font-semibold text-[#090E18] mb-1 text-base">Account status</h4>
-            <p className="text-sm text-[#BEBEBE] mb-4 truncate overflow-hidden whitespace-nowrap">Paid Orders, Chargebacks, Refunded</p>
+            <p className="text-sm text-[#BEBEBE] mb-4 truncate overflow-hidden whitespace-nowrap">
+              Paid Orders, Chargebacks, Refunded
+            </p>
             <div className="space-y-3">
               <div className="flex items-center gap-4">
                 <div className="w-16 h-16">
@@ -563,8 +724,12 @@ const Dashboard: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <p className="font-semibold text-base text-[#090E18] truncate overflow-hidden whitespace-nowrap">Paid Orders</p>
-                  <p className="text-sm text-[#BEBEBE] truncate overflow-hidden whitespace-nowrap">{orderStatus?.paid?.amount || 0} in this period</p>
+                  <p className="font-semibold text-base text-[#090E18] truncate overflow-hidden whitespace-nowrap">
+                    Paid Orders
+                  </p>
+                  <p className="text-sm text-[#BEBEBE] truncate overflow-hidden whitespace-nowrap">
+                    {orderStatus?.paid?.amount || 0} in this period
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-4">
@@ -582,8 +747,12 @@ const Dashboard: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <p className="font-semibold text-base text-[#090E18] truncate overflow-hidden whitespace-nowrap">Chargebacks</p>
-                  <p className="text-sm text-[#BEBEBE] truncate overflow-hidden whitespace-nowrap">{orderStatus?.chargeback?.amount || 0} in this period</p>
+                  <p className="font-semibold text-base text-[#090E18] truncate overflow-hidden whitespace-nowrap">
+                    Chargebacks
+                  </p>
+                  <p className="text-sm text-[#BEBEBE] truncate overflow-hidden whitespace-nowrap">
+                    {orderStatus?.chargeback?.amount || 0} in this period
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-4">
@@ -601,8 +770,12 @@ const Dashboard: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <p className="font-semibold text-base text-[#090E18] truncate overflow-hidden whitespace-nowrap">Refunded</p>
-                  <p className="text-sm text-[#BEBEBE] truncate overflow-hidden whitespace-nowrap">{orderStatus?.refunded?.amount || 0} in this period</p>
+                  <p className="font-semibold text-base text-[#090E18] truncate overflow-hidden whitespace-nowrap">
+                    Refunded
+                  </p>
+                  <p className="text-sm text-[#BEBEBE] truncate overflow-hidden whitespace-nowrap">
+                    {orderStatus?.refunded?.amount || 0} in this period
+                  </p>
                 </div>
               </div>
             </div>
