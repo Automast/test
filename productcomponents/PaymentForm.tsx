@@ -329,18 +329,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
           )}
           
           {/* PayPal Option */}
-          <div className="flex items-center">
-            <input
-              type="radio"
-              id="paypal"
-              name="paymentMethod"
-              value="paypal"
-              checked={paymentMethod === 'paypal'}
-              onChange={() => setPaymentMethod('paypal')}
-              className="mr-2"
-            />
-            <label htmlFor="paypal">PayPal</label>
-          </div>
+
         </div>
         
         {/* Coming soon message */}
