@@ -1,7 +1,7 @@
 'use client';
 
 import { DashLayout } from '@/components/layouts';
-import { BinaryIcon, MoreHorizontal, TagIcon, Eye, Edit, Trash2 } from 'lucide-react';
+import { BinaryIcon, MoreHorizontal, TagIcon, Eye, Edit, Copy, Trash2 } from 'lucide-react';
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import { Pagination } from '@/components/widgets';
@@ -195,6 +195,17 @@ const ProductsPage = () => {
     }
   };
 
+  /** Copy full public product URL to clipboard */
+  const handleCopyLink = (product: Product) => {
+    const base =
+      process.env.NEXT_PUBLIC_PUBLIC_SITE_URL || window.location.origin; // set NEXT_PUBLIC_PUBLIC_SITE_URL in .env for production
+    const url = `${base}/product/${product.slug ?? product._id}`;
+    navigator.clipboard
+      .writeText(url)
+      .then(() => Toaster.success('Product link copied'))
+      .catch(() => Toaster.error('Failed to copy link'));
+  };
+
   return (
     <DashLayout
       titleArea={
@@ -369,6 +380,7 @@ const ProductsPage = () => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         <div className="flex items-center space-x-2">
+                          {/* View */}
                           <button
                             onClick={() => handleView(product)}
                             className="text-blue-600 hover:text-blue-900 p-1 rounded hover:bg-blue-50"
@@ -376,6 +388,7 @@ const ProductsPage = () => {
                           >
                             <Eye className="w-4 h-4" />
                           </button>
+                          {/* Edit */}
                           <button
                             onClick={() => handleEdit(product)}
                             className="text-indigo-600 hover:text-indigo-900 p-1 rounded hover:bg-indigo-50"
@@ -383,6 +396,15 @@ const ProductsPage = () => {
                           >
                             <Edit className="w-4 h-4" />
                           </button>
+                          {/* Copy link — NEW */}
+                          <button
+                            onClick={() => handleCopyLink(product)}
+                            className="text-gray-600 hover:text-gray-800 p-1 rounded hover:bg-gray-50"
+                            title="Copy Link"
+                          >
+                            <Copy className="w-4 h-4" />
+                          </button>
+                          {/* Delete */}
                           <button
                             onClick={() => handleDelete(product)}
                             className="text-red-600 hover:text-red-900 p-1 rounded hover:bg-red-50"

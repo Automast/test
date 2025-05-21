@@ -1,6 +1,7 @@
 'use client';
 
-import { X, Edit, Calendar, Package, Tag, Globe, DollarSign, FileText, Archive } from 'lucide-react';
+import { X, Edit, Copy, Calendar, Package, Tag, Globe, DollarSign, FileText, Archive } from 'lucide-react';
+import Toaster from '@/helpers/Toaster';
 import { createPortal } from 'react-dom';
 import { useEffect, useState } from 'react';
 
@@ -76,6 +77,13 @@ const ProductViewModal: React.FC<ProductViewModalProps> = ({
 
   if (!mounted || !open || !product) return null;
 
+  // Full public link for the displayed product
+  const productUrl = 
+    (typeof window !== 'undefined'
+      ? process.env.NEXT_PUBLIC_PUBLIC_SITE_URL || window.location.origin
+      : '') 
+    + `/product/${product.slug}`;
+
   const formatImageUrl = (imageUrl: string) => {
     if (!imageUrl) return '/api/placeholder/200/200';
     if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
@@ -118,7 +126,35 @@ const ProductViewModal: React.FC<ProductViewModalProps> = ({
       >
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200 flex-shrink-0">
-          <h2 className="text-2xl font-bold text-gray-900">Product Details</h2>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900">Product Details</h2>
+            
+            {/* Product Link - Moved to header section with better styling */}
+            <div className="flex items-center mt-2 space-x-1">
+              <Globe className="w-4 h-4 text-gray-500" />
+              <div className="flex items-center bg-gray-50 rounded border border-gray-200 overflow-hidden">
+                <input 
+                  type="text" 
+                  readOnly 
+                  value={productUrl} 
+                  className="flex-1 px-3 py-1 text-sm bg-transparent outline-none" 
+                />
+                <button 
+                  onClick={() => 
+                    navigator.clipboard
+                      .writeText(productUrl)
+                      .then(() => Toaster.success('Product link copied'))
+                      .catch(() => Toaster.error('Failed to copy link'))
+                  }
+                  className="p-2 hover:bg-gray-200 border-l border-gray-200" 
+                  title="Copy Link"
+                >
+                  <Copy className="w-4 h-4 text-gray-600" />
+                </button>
+              </div>
+            </div>
+          </div>
+          
           <div className="flex items-center space-x-3">
             <button
               onClick={() => onEdit(product)}

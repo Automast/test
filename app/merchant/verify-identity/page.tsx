@@ -161,6 +161,8 @@ export default function VerifyIdentityPage() {
 
   // Get merchant info from localStorage (your existing auth system)
   const [merchantInfo, setMerchantInfo] = useState<any>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [initialized, setInitialized] = useState<boolean>(false);
 
   useEffect(() => {
     // Get merchant info from your existing auth system
@@ -170,10 +172,12 @@ export default function VerifyIdentityPage() {
         try {
           const parsed = JSON.parse(userData);
           setMerchantInfo(parsed);
+          setIsAuthenticated(true);
         } catch (error) {
           console.error('Error parsing user data:', error);
         }
       }
+      setInitialized(true);
     }
   }, []);
 
@@ -265,6 +269,10 @@ export default function VerifyIdentityPage() {
     (rate: any) => rate.receiptDays === parseInt(formData.receiptTime)
   );
 
+  /* ------------------------------------------------------------------
+   * EFFECTS
+   * -----------------------------------------------------------------*/
+
   // Mark rejected fields on load
   useEffect(() => {
     if (rejectedFields.length > 0) {
@@ -286,10 +294,19 @@ export default function VerifyIdentityPage() {
     }
   }, [rejectedFields]);
 
-  // Fetch verification status on mount
+  // Fetch verification status on mount and when authentication changes
   useEffect(() => {
-    fetchStatus();
-  }, [fetchStatus]);
+    if (isAuthenticated && initialized) {
+      fetchStatus();
+    }
+  }, [isAuthenticated, initialized, fetchStatus]);
+
+  // Redirect if not authenticated
+  useEffect(() => {
+    if (!isAuthenticated && initialized) {
+      router.replace('/signin');
+    }
+  }, [isAuthenticated, initialized, router]);
 
   // Populate form with merchant data
   useEffect(() => {
@@ -318,8 +335,48 @@ export default function VerifyIdentityPage() {
         receiptTime: verificationData.paymentSettings?.receiptTime.toString() || prev.receiptTime,
         paymentMethods: getActiveMethods(verificationData.paymentSettings?.methods) || prev.paymentMethods,
       }));
+      
+      // Try to set preview images for existing documents
+      if (verificationData.businessDocument?.documentImage) {
+        setPreviews(prev => ({ 
+          ...prev, 
+          businessDocImage: `/api/verification/document-preview?type=business&field=document&timestamp=${Date.now()}` 
+        }));
+      }
+      
+      if (verificationData.personalDocument?.frontImage) {
+        setPreviews(prev => ({ 
+          ...prev, 
+          personalDocFront: `/api/verification/document-preview?type=personal&field=front&timestamp=${Date.now()}` 
+        }));
+      }
+      
+      if (verificationData.personalDocument?.backImage) {
+        setPreviews(prev => ({ 
+          ...prev, 
+          personalDocBack: `/api/verification/document-preview?type=personal&field=back&timestamp=${Date.now()}` 
+        }));
+      }
+      
+      if (verificationData.personalDocument?.selfieImage) {
+        setPreviews(prev => ({ 
+          ...prev, 
+          personalSelfie: `/api/verification/document-preview?type=personal&field=selfie&timestamp=${Date.now()}` 
+        }));
+      }
+      
+      if (verificationData.bankDetails?.statementDocument) {
+        setPreviews(prev => ({ 
+          ...prev, 
+          bankStatement: `/api/verification/document-preview?type=bank&field=statement&timestamp=${Date.now()}` 
+        }));
+      }
     }
   }, [verificationData, status]);
+
+  /* ------------------------------------------------------------------
+   * HELPERS
+   * -----------------------------------------------------------------*/
 
   // Helper to extract active payment methods
   const getActiveMethods = (methods: any) => {
@@ -472,8 +529,10 @@ export default function VerifyIdentityPage() {
   // Scroll to first error
   const scrollToFirstError = () => {
     setTimeout(() => {
+      // First scroll to the top error message
       window.scrollTo({ top: 0, behavior: 'smooth' });
       
+      // Then, after a short delay, scroll to the first field with an error
       setTimeout(() => {
         const firstErrorField = Object.keys(errors)[0];
         if (firstErrorField) {
@@ -485,6 +544,10 @@ export default function VerifyIdentityPage() {
       }, 500);
     }, 100);
   };
+
+  /* ------------------------------------------------------------------
+   * SUBMIT
+   * -----------------------------------------------------------------*/
 
   // Handle form submission
   const handleSubmit = async (e: FormEvent) => {
@@ -506,6 +569,7 @@ export default function VerifyIdentityPage() {
       // Add all form fields
       Object.entries(formData).forEach(([key, value]) => {
         if (key === 'paymentMethods') {
+          // Handle payment methods array
           apiFormData.append(key, JSON.stringify(value));
         } else {
           apiFormData.append(key, value.toString());
@@ -537,6 +601,7 @@ export default function VerifyIdentityPage() {
       const success = await submitDocuments(apiFormData);
       
       if (success) {
+        // Keep submitting state true to show the pending screen
         router.push('/merchant');
       } else {
         setSubmitting(false);
@@ -548,6 +613,10 @@ export default function VerifyIdentityPage() {
       setSubmitting(false);
     }
   };
+
+  /* ------------------------------------------------------------------
+   * EARLY RETURNS (VERIFIED / PENDING)
+   * -----------------------------------------------------------------*/
 
   // Render status message if already verified
   if (status === 'verified') {
@@ -633,6 +702,10 @@ export default function VerifyIdentityPage() {
     );
   }
 
+  /* ------------------------------------------------------------------
+   * MAIN FORM UI
+   * -----------------------------------------------------------------*/
+
   // Helper function to display processing fee
   function getProcessingFeeDisplay(days: string): string {
     const rate = paymentRates?.find((r: any) => r.receiptDays === parseInt(days));
@@ -697,7 +770,7 @@ export default function VerifyIdentityPage() {
           </div>
         </div>
         
-        {/* Rejected notice */}
+        {/* Rejected notice - Show this even if user is trying to resubmit */}
         {status === 'rejected' && rejectedFields.length > 0 && (
           <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-md mb-6">
             <div className="flex">
@@ -857,6 +930,74 @@ export default function VerifyIdentityPage() {
                   )}
                 </div>
               </div>
+
+              {/* Business Document Image */}
+              {highlightedFields.includes('businessDocImage') && (
+                <div className="sm:col-span-6">
+                  <label htmlFor="businessDocImage" className="block text-sm font-medium text-gray-700">
+                    Business Document
+                  </label>
+                  <div className="mt-1">
+                    <div className={`flex justify-center px-6 pt-5 pb-6 border-2 border-dashed rounded-md ${
+                      errors.businessDocImage ? 'border-red-300 bg-red-50' : 
+                      highlightedFields.includes('businessDocImage') ? 'border-yellow-300 bg-yellow-50' :
+                      previews.businessDocImage ? 'border-green-300 bg-green-50' : 'border-gray-300'
+                    }`}>
+                      <div className="space-y-1 text-center">
+                        {previews.businessDocImage ? (
+                          <div className="flex flex-col items-center">
+                            {previews.businessDocImage.startsWith('data:image') ? (
+                              <img 
+                                src={previews.businessDocImage} 
+                                alt="Document preview" 
+                                className="h-32 object-contain mb-2"
+                              />
+                            ) : (
+                              <FileCheck className="h-12 w-12 text-green-500 mb-2" />
+                            )}
+                            <p className="text-sm text-gray-700">{files.businessDocImage?.name || "Document uploaded"}</p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFiles(prev => ({ ...prev, businessDocImage: null }));
+                                setPreviews(prev => ({ ...prev, businessDocImage: '' }));
+                              }}
+                              className="mt-2 text-xs font-medium text-red-600 hover:text-red-500"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <UploadIcon className="mx-auto h-12 w-12 text-gray-400" />
+                            <div className="flex text-sm text-gray-600">
+                              <label
+                                htmlFor="businessDocImage"
+                                className="relative cursor-pointer rounded-md bg-white font-medium text-blue-600 hover:text-blue-500"
+                              >
+                                <span>Upload a file</span>
+                                <input
+                                  id="businessDocImage"
+                                  name="businessDocImage"
+                                  type="file"
+                                  className="sr-only"
+                                  accept="image/jpeg,image/png,image/gif,application/pdf"
+                                  onChange={handleFileChange}
+                                />
+                              </label>
+                              <p className="pl-1">or drag and drop</p>
+                            </div>
+                            <p className="text-xs text-gray-500">JPEG, PNG, GIF, PDF up to 10MB</p>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    {errors.businessDocImage && (
+                      <p className="mt-1 text-xs text-red-600">{errors.businessDocImage}</p>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

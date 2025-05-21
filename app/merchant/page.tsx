@@ -15,16 +15,16 @@ import '@/assets/styles/dashboard.css';
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
 import Link from 'next/link';
 
-const CustomTooltip: React.FC<{ payload?: Array<{ payload: { value: number | string } }>; label?: string }> = ({
+const CustomTooltip: React.FC<{ payload?: Array<{ payload: { value: number | string }; value: number }>; label?: string; active?: boolean }> = ({
+  active,
   payload,
   label,
 }) => {
-  if (!payload || payload.length === 0) return null;
+  if (!active || !payload || payload.length === 0) return null;
 
-  const data = payload[0].payload;
   return (
     <div style={{ backgroundColor: 'black', color: 'white', padding: '10px', borderRadius: '5px' }}>
-      <p className="text-sm">US$ {data.value}</p>
+      <p className="text-sm">US$ {payload[0].value?.toFixed(2)}</p>
       <p className="text-xs">{label}</p>
     </div>
   );
@@ -32,6 +32,7 @@ const CustomTooltip: React.FC<{ payload?: Array<{ payload: { value: number | str
 
 const Dashboard = () => {
   const [period, setPeriod] = useState<number>(0); // 0 = today, 1 = yesterday, 7 = week, etc.
+  const [dateLabel, setDateLabel] = useState<string>(''); // ← new
   const [userData, setUserData] = useState<any>(null);
   const [merchantData, setMerchantData] = useState<any>(null);
   const [balances, setBalances] = useState<any>(null);
@@ -64,6 +65,15 @@ const Dashboard = () => {
     maximumFractionDigits: 2,
   });
 
+  /* utilities */
+  const labelForPoint = (d: any) => 
+    period <= 1 // 0=today, 1=yesterday
+      ? `${String(d.hour).padStart(2, '0')}:00`
+      : new Date(d.date).toLocaleDateString(undefined, {
+          month: 'short',
+          day: 'numeric',
+        });
+
   // Check if we're on the client side
   useEffect(() => {
     setIsClient(true);
@@ -91,250 +101,120 @@ const Dashboard = () => {
   }, [isClient, userData, fetchStatus]);
 
   const loadDashboard = async () => {
-    if (typeof window === 'undefined') return;
-
+    setLoading(true);
     try {
-      setLoading(true);
       const token = localStorage.getItem('jwt_token');
-
       if (!token) {
         window.location.href = '/signin';
         return;
       }
-
-      // 1. Get user and merchant info using the correct endpoint
-      const meResponse = await fetch('/api/auth/me', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (meResponse.status === 401) {
-        localStorage.removeItem('jwt_token');
-        localStorage.removeItem('user_data');
-        window.location.href = '/signin';
-        return;
-      }
-
-      const meData = await meResponse.json();
-      if (!meData.success) {
-        throw new Error('Failed to load user data');
-      }
-
-      const { user, merchant } = meData.data;
+      const baseUrl =
+        process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+      /* ---------------------------------------------------------
+       * 1.  Profile   (who am I? + which currency do I think in?)
+       * --------------------------------------------------------*/
+      const meRes = await fetch(`${baseUrl}/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }).then((r) => r.json());
+      if (!meRes.success) throw new Error('Failed to load user data');
+      const { user, merchant } = meRes.data;
       setUserData(user);
       setMerchantData(merchant);
-
-      // Store user data in localStorage for verification page
       localStorage.setItem('user_data', JSON.stringify(merchant));
-
-      // Determine dashboard currency based on merchant country
-      const isBrazil = merchant.country === 'BR';
-      const dashCur = isBrazil ? 'BRL' : 'USD';
+      const dashCur = merchant.country === 'BR' ? 'BRL' : 'USD';
       setDashboardCurrency(dashCur);
-
-      // 2. Get date ranges for current and previous periods
-      const rangeNow = getDateRange(period);
-      const rangePrev = getPreviousDateRange(period, rangeNow);
-
-      // 3. Fetch balance and transaction data in parallel
-      const [balanceResponse, txNowResponse, txPrevResponse] = await Promise.all([
-        fetch('/api/finance/balance', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        }),
-        fetch(`/api/finance/transactions?fromDate=${encodeURIComponent(rangeNow.from)}&toDate=${encodeURIComponent(rangeNow.to)}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        }),
-        fetch(`/api/finance/transactions?fromDate=${encodeURIComponent(rangePrev.from)}&toDate=${encodeURIComponent(rangePrev.to)}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        })
-      ]);
-
-      const balanceData = await balanceResponse.json();
-      const txNowData = await txNowResponse.json();
-      const txPrevData = await txPrevResponse.json();
-
-      // Set balances
-      if (balanceData.success) {
-        setBalances(balanceData.data.balances);
-      }
-
-      // Process transaction data for metrics
-      const txNow = txNowData.success ? txNowData.data.transactions : [];
-      const txPrev = txPrevData.success ? txPrevData.data.transactions : [];
-
-      const statsNow = calcStats(txNow, dashCur);
-      const statsPrev = calcStats(txPrev, dashCur);
-
+      /* ---------------------------------------------------------
+       * 2.  Balances
+       * --------------------------------------------------------*/
+      const balRes = await fetch(`${baseUrl}/finance/balance`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }).then((r) => r.json());
+      if (balRes.success) setBalances(balRes.data.balances);
+      /* ---------------------------------------------------------
+       * 3.  KPIs – one ready-made endpoint does everything
+       * --------------------------------------------------------*/
+      const rangeMap: Record<number, string> = {
+        0: 'today',
+        1: 'yesterday',
+        7: 'last7',
+        30: 'last30',
+      };
+      const range = rangeMap[period] ?? 'today';
+      const kpiRes = await fetch(
+        `${baseUrl}/finance/dashboard-metrics?range=${range}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      ).then((r) => r.json());
+      if (!kpiRes.success) throw new Error('Failed to load metrics');
+      const m = kpiRes.data;
+      setDateLabel(m.rangeLabel); // ← new
+      /* ---------- top cards ---------- */
       setOrderOverview({
         gross: {
-          amount: statsNow.gross,
-          delta: percentChange(statsNow.gross, statsPrev.gross)
+          amount: m.grossRevenue.value,
+          delta: m.grossRevenue.changePct,
         },
         paidOrder: {
-          amount: statsNow.paid,
-          delta: percentChange(statsNow.paid, statsPrev.paid)
+          amount: m.paidOrders.value,
+          delta: m.paidOrders.changePct,
         },
         averageSucceedOrder: {
-          amount: statsNow.acceptance,
-          delta: percentChange(statsNow.acceptance, statsPrev.acceptance)
+          amount: m.cardAcceptance.value,
+          delta: m.cardAcceptance.changePct,
+        },
+      });
+      /* ---------- account-status ring ---------- */
+      const total =
+        m.statusCounts.paid +
+        m.statusCounts.refunded +
+        m.statusCounts.chargebacks;
+      const pct = (v: number) =>
+        total ? Math.round((v / total) * 100) : 0;
+      setOrderStatus({
+        paid:       { amount: m.statusCounts.paid,        percent: pct(m.statusCounts.paid) },
+        chargeback: { amount: m.statusCounts.chargebacks, percent: pct(m.statusCounts.chargebacks) },
+        refunded:   { amount: m.statusCounts.refunded,    percent: pct(m.statusCounts.refunded) },
+      });
+      
+      /* ---------- sales overview chart ---------- */
+      // Transform chart data properly handling both hourly and daily formats
+      const formattedChartData = m.chart.map((item: any) => {
+        // Format x-axis label
+        let label = '';
+        
+        if ('hour' in item) {
+          // Hourly data (for today/yesterday)
+          label = `${String(item.hour).padStart(2, '0')}:00`;
+          return {
+            xLabel: label,
+            value: item.grossRevenue || 0,
+            // Keep original properties for reference
+            hour: item.hour,
+            grossRevenue: item.grossRevenue || 0
+          };
+        } else {
+          // Daily data (for week/month)
+          const dateObj = new Date(item.date);
+          label = dateObj.toLocaleDateString(undefined, {
+            month: 'short',
+            day: 'numeric',
+          });
+          return {
+            xLabel: label,
+            value: item.grossRevenue || 0,
+            // Keep original properties for reference
+            date: item.date,
+            grossRevenue: item.grossRevenue || 0
+          };
         }
       });
-
-      // Calculate order status
-      const orderStatusData = calcOrderStatus(txNow);
-      setOrderStatus(orderStatusData);
-
-      // Generate sales chart data (last 12 months)
-      const chartData = await generateSalesData(token, dashCur);
-      setSalesData(chartData);
-
-    } catch (error) {
-      console.error('Dashboard load error:', error);
+      
+      setSalesData(formattedChartData);
+    } catch (err) {
+      console.error('Dashboard load error:', err);
+      Toaster.error('Failed to load dashboard data');
     } finally {
       setLoading(false);
     }
-  };
-
-  const calcStats = (txs: any[], currency: string) => {
-    let gross = 0, paid = 0, cardTry = 0, cardOk = 0;
-
-    txs.forEach(tx => {
-      if (tx.payment_method === 'card') {
-        cardTry++;
-        if (isSuccess(tx)) cardOk++;
-      }
-      if (isSuccess(tx)) {
-        paid++;
-        // Use the correct currency field based on dashboard currency
-        gross += currency === 'USD'
-          ? (tx.amount_usd ?? tx.amount ?? 0)
-          : (tx.amount_brl ?? tx.amount ?? 0);
-      }
-    });
-
-    return {
-      gross,
-      paid,
-      acceptance: cardTry ? (cardOk / cardTry * 100) : 0
-    };
-  };
-
-  const calcOrderStatus = (txs: any[]) => {
-    let total = txs.length;
-    let paid = 0, chargeback = 0, refunded = 0;
-
-    txs.forEach(tx => {
-      if (isSuccess(tx)) paid++;
-      else if (tx.status === 'chargeback') chargeback++;
-      else if (tx.status === 'refunded') refunded++;
-    });
-
-    return {
-      paid: {
-        amount: paid,
-        percent: total ? Math.round((paid / total) * 100) : 0
-      },
-      chargeback: {
-        amount: chargeback,
-        percent: total ? Math.round((chargeback / total) * 100) : 0
-      },
-      refunded: {
-        amount: refunded,
-        percent: total ? Math.round((refunded / total) * 100) : 0
-      }
-    };
-  };
-
-  const isSuccess = (tx: any) => ['captured', 'succeeded'].includes(tx.status);
-
-  const percentChange = (now: number, prev: number) => {
-    if (prev === 0) return now === 0 ? 0 : null;
-    return Math.round(((now - prev) / prev) * 100);
-  };
-
-  const generateSalesData = async (token: string, currency: string) => {
-    const data = [];
-    const now = new Date();
-
-    for (let i = 11; i >= 0; i--) {
-      const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
-
-      try {
-        const response = await fetch(`/api/finance/transactions?fromDate=${monthStart.toISOString()}&toDate=${monthEnd.toISOString()}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        const result = await response.json();
-        if (result.success) {
-          const stats = calcStats(result.data.transactions, currency);
-          data.push({
-            month: monthStart.toLocaleDateString('en-US', { month: 'short' }),
-            value: stats.gross
-          });
-        } else {
-          data.push({
-            month: monthStart.toLocaleDateString('en-US', { month: 'short' }),
-            value: 0
-          });
-        }
-      } catch (error) {
-        data.push({
-          month: monthStart.toLocaleDateString('en-US', { month: 'short' }),
-          value: 0
-        });
-      }
-    }
-
-    return data;
-  };
-
-  const getDateRange = (filter: number) => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const iso = (d: Date) => d.toISOString();
-
-    switch (filter) {
-      case 0: // today
-        return { from: iso(today), to: iso(new Date(today.getTime() + 24 * 60 * 60 * 1000)) };
-      case 1: // yesterday
-        const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
-        return { from: iso(yesterday), to: iso(today) };
-      case 7: // last 7 days
-        const week = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
-        return { from: iso(week), to: iso(new Date(today.getTime() + 24 * 60 * 60 * 1000)) };
-      case 30: // last 30 days
-        const month = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
-        return { from: iso(month), to: iso(new Date(today.getTime() + 24 * 60 * 60 * 1000)) };
-      default:
-        return { from: iso(today), to: iso(new Date(today.getTime() + 24 * 60 * 60 * 1000)) };
-    }
-  };
-
-  const getPreviousDateRange = (filter: number, current: any) => {
-    const currentDate = new Date(current.from);
-    const daysDiff = Math.ceil((new Date(current.to).getTime() - currentDate.getTime()) / (1000 * 60 * 60 * 24));
-    const prevStart = new Date(currentDate.getTime() - daysDiff * 24 * 60 * 60 * 1000);
-    const prevEnd = new Date(prevStart.getTime() + daysDiff * 24 * 60 * 60 * 1000);
-
-    return {
-      from: prevStart.toISOString(),
-      to: prevEnd.toISOString()
-    };
   };
 
   // Handle resend verification email
@@ -359,39 +239,35 @@ const Dashboard = () => {
     }
   };
 
-  // Automatically resend verification email once on initial load if needed
-
   // Determine verification status
   const getVerificationStatus = () => {
     if (!userData) return null;
 
-    // Check if user's identity is already verified
+    // Already verified server-side
     if (userData.idVerified || userData.idCheckStatus === 'verified') {
       return 'verified';
     }
 
-    // Check if there's verification data
+    // If we've submitted docs and the server tells us a status
     if (verificationData?.status) {
       return verificationData.status;
     }
 
-    // Check from verification context
-    if (status) {
-      return status;
+    // If backend says the submission was rejected
+    if (userData.idCheckStatus === 'rejected') {
+      return 'rejected';
     }
 
-    // Check user's idCheckStatus as fallback
-    if (userData.idCheckStatus && userData.idCheckStatus !== 'pending') {
-      return userData.idCheckStatus;
-    }
-
+    // Otherwise, no submission yet
     return 'not_started';
   };
 
   const verificationStatus = getVerificationStatus();
-  const isVerified = verificationStatus === 'verified';
-  const isRejected = verificationStatus === 'rejected' || (rejectedFields && rejectedFields.length > 0);
-  const isPending = verificationStatus === 'pending';
+  const isVerified      = verificationStatus === 'verified';
+  const isRejected      = verificationStatus === 'rejected' || (rejectedFields && rejectedFields.length > 0);
+  // ONLY treat "pending" when the server actually returned pending
+  const isPending       = verificationData?.status === 'pending';
+  // Show "start verification" when truly not started
   const needsVerification = !isVerified && !isRejected && !isPending && verificationStatus === 'not_started';
 
   const periods = [
@@ -439,12 +315,7 @@ const Dashboard = () => {
             Hello, {merchantData?.businessName || 'Business'}
           </h2>
           <p className="text-sm text-gray-500">
-            {new Intl.DateTimeFormat('en-US', {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: '2-digit',
-            }).format(new Date())}
+            {dateLabel}
           </p>
         </>
       }
@@ -492,7 +363,7 @@ const Dashboard = () => {
                 {verificationLink && (
                   <div className="mt-2 p-2 bg-amber-100 rounded text-xs break-all overflow-auto">
                     <p className="text-amber-800 font-medium mb-1">Demo verification link:</p>
-                    <a  // Corrected <a> tag
+                    <a
                       href={verificationLink}
                       target="_blank"
                       rel="noopener noreferrer"
@@ -645,9 +516,16 @@ const Dashboard = () => {
                     <stop offset="95%" stopColor="#006AFF" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <XAxis dataKey="month" stroke="#9FA6B2" tickLine={false} tick={{ fontSize: 12 }} />
+                <XAxis 
+                  dataKey="xLabel" 
+                  stroke="#9FA6B2" 
+                  tickLine={false} 
+                  tick={{ fontSize: 12 }}
+                  height={40}
+                  minTickGap={0}
+                  tickMargin={8}
+                />
                 <YAxis
-                  dataKey="value"
                   stroke="#9FA6B2"
                   tickLine={false}
                   axisLine={false}
@@ -659,7 +537,13 @@ const Dashboard = () => {
                 />
                 <CartesianGrid stroke="#D2D6DC33" vertical={false} />
                 <Tooltip content={<CustomTooltip />} />
-                <Area type="monotone" dataKey="value" stroke="#006AFF" fillOpacity={1} fill="url(#colorSales)" />
+                <Area 
+                  type="monotone" 
+                  dataKey="value" 
+                  stroke="#006AFF" 
+                  fillOpacity={1} 
+                  fill="url(#colorSales)" 
+                />
               </AreaChart>
             </ResponsiveContainer>
           </div>

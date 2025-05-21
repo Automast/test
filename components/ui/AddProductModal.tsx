@@ -173,7 +173,7 @@ const AddProductModal: React.FC<{
   const [price, setPrice] = useState(''); // Use string to allow empty state
   const [currency, setCurrency] = useState('USD');
   const [autoLocalPrice, setAutoLocalPrice] = useState(true);
-  const [productType] = useState(initialType); // Remove setter, use initial type only
+  const productType = initialType; // Remove setter, use initial type only
   const [sku, setSku] = useState('');
   const [barcode, setBarcode] = useState('');
 

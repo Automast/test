@@ -26,6 +26,7 @@ const DashLayout: React.FC<{ children: ReactNode; titleArea: ReactNode; tools?: 
   const ref = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
   const [notiList, setNotiList] = useState<Notification[]>([] as Notification[]);
+  const [notiRequested, setNotiRequested] = useState(false);
 
   // Check if we're on the client side
   useEffect(() => {
@@ -148,11 +149,13 @@ const DashLayout: React.FC<{ children: ReactNode; titleArea: ReactNode; tools?: 
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Fix for notification API excessive calls
   useEffect(() => {
-    if (isClient) {
+    if (isClient && !notiRequested) {
       sendNotiRequest();
+      setNotiRequested(true);
     }
-  }, [isClient, sendNotiRequest]); // Added sendNotiRequest to dependency array as it's used in the effect
+  }, [isClient, notiRequested]); // Removed sendNotiRequest from dependencies
 
   useEffect(() => {
     if (notiError) {
