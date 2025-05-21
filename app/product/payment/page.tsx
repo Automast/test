@@ -134,3 +134,6 @@ const PaymentResultPage = () => {
 };
 
 export default PaymentResultPage;
+
+// Force dynamic rendering to avoid static generation issues with useSearchParams
+export const dynamic = 'force-dynamic';
