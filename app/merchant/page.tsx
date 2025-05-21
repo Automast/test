@@ -9,25 +9,32 @@ import { useVerification } from '@/context/VerificationContext';
 import { useApiRequest } from '@/hooks';
 import { sendVerificationEmailUrl } from '@/consts/paths';
 import Toaster from '@/helpers/Toaster';
+import { TooltipProps } from 'recharts';
 
 import 'react-circular-progressbar/dist/styles.css';
 import '@/assets/styles/dashboard.css';
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
 import Link from 'next/link';
-
-const CustomTooltip: React.FC<{ payload?: Array<{ payload: { value: number | string }; value: number }>; label?: string; active?: boolean }> = ({
-  active,
-  payload,
-  label,
-}) => {
+interface CustomTooltipProps extends TooltipProps<any, any> {
+   dashboardCurrency: string;
+ }
+ const CustomTooltip: React.FC<CustomTooltipProps> = ({
+   active,
+   payload,
+   label,
+   dashboardCurrency,
+ }) => { 
   if (!active || !payload || payload.length === 0) return null;
-
-  return (
-    <div style={{ backgroundColor: 'black', color: 'white', padding: '10px', borderRadius: '5px' }}>
-      <p className="text-sm">US$ {payload[0].value?.toFixed(2)}</p>
-      <p className="text-xs">{label}</p>
-    </div>
-  );
+// put this **before** the return
+const symbol = dashboardCurrency === 'BRL' ? 'R$' : 'US$';
+return (
+  <div style={{ backgroundColor: 'black', color: 'white', padding: '10px', borderRadius: '5px' }}>
+    <p className="text-sm">
+      {symbol} {Number(payload[0].value).toFixed(2)}
+    </p>
+    <p className="text-xs">{label}</p>
+  </div>
+);
 };
 
 const Dashboard = () => {
@@ -536,7 +543,11 @@ const Dashboard = () => {
                   tick={{ fontSize: 12 }}
                 />
                 <CartesianGrid stroke="#D2D6DC33" vertical={false} />
-                <Tooltip content={<CustomTooltip />} />
+                <Tooltip
+   content={(props) => ( 
+     <CustomTooltip {...props} dashboardCurrency={dashboardCurrency} /> 
+   )} 
+ />
                 <Area 
                   type="monotone" 
                   dataKey="value" 

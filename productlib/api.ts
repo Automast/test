@@ -1,5 +1,5 @@
 // productlib/api.ts
-import { ITransaction, IApiResponse } from './types';
+import { ITransaction, IApiResponse, IProduct } from './types';
 
 // Always use the full backend URL from NEXT_PUBLIC_API_URL (or default to localhost:5000/api)
 const API_BASE_URL =
@@ -11,7 +11,6 @@ export const getApiUrl = (path: string): string => {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
   return `${API_BASE_URL}${normalizedPath}`;
 };
-
 
 /**
  * Fetch a product by slug
@@ -93,15 +92,9 @@ export const createTransaction = async (transaction: ITransaction): Promise<IApi
       buyerEmail: transaction.buyerEmail ? '***@***.com' : undefined,
     });
     
-    // Get token and validate it exists
-    const token = typeof window !== 'undefined' ? localStorage.getItem('jwt_token') : '';
-    if (!token) {
-      throw new Error('Authentication token is missing. Please log in again.');
-    }
-
+    // No authentication token required for public payments
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
+      'Content-Type': 'application/json'
     };
 
     const response = await fetch(url, {
