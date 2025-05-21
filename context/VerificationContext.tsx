@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useState, useContext, ReactNode, useCallback } from 'react';
+import React, { createContext, useState, useContext, ReactNode, useCallback, useRef, useEffect } from 'react';
 import { apiBaseUrl, verificationStatusUrl, verificationSubmitUrl } from '@/consts/paths';
 import { useApiRequest } from '@/hooks';
 import Toaster from '@/helpers/Toaster';
@@ -46,6 +46,26 @@ export const VerificationProvider: React.FC<{ children: ReactNode }> = ({ childr
   const [paymentRates, setPaymentRates] = useState<any[]>([]);
   const [rejectedFields, setRejectedFields] = useState<string[]>([]);
   const [rejectionReasons, setRejectionReasons] = useState<Record<string, string>>({});
+  
+  // Setup polling
+  const [shouldPoll, setShouldPoll] = useState<boolean>(false);
+  const pollingIntervalRef = useRef<number | null>(null);
+  const lastFetchTimeRef = useRef<number>(0);
+  
+  // Check if we're on the dashboard page
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const isDashboard = window.location.pathname === '/merchant';
+      setShouldPoll(isDashboard);
+      
+      // Clean up polling interval when component unmounts
+      return () => {
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current);
+        }
+      };
+    }
+  }, []);
 
   const { sendRequest: fetchStatusRequest } = useApiRequest({
     endpoint: verificationStatusUrl,
@@ -58,14 +78,26 @@ export const VerificationProvider: React.FC<{ children: ReactNode }> = ({ childr
   });
 
   // Fetch verification status
+  // We're using useRef to make this stable
+  const stableFetchStatusRequest = useRef(fetchStatusRequest).current;
+  
   const fetchStatus = useCallback(async () => {
+    // Throttle requests - don't make a request if the last one was less than 5 seconds ago
+    const now = Date.now();
+    if (now - lastFetchTimeRef.current < 5000) {
+      return;
+    }
+    
+    lastFetchTimeRef.current = now;
+    
     try {
       setIsLoading(true);
       
-      const response = await fetchStatusRequest();
+      // Use type assertion to tell TypeScript to trust that the response has the structure we expect
+      const response = await stableFetchStatusRequest() as any;
       
       if (response?.success) {
-        const data: VerificationStatus = response.data;
+        const data = response.data as VerificationStatus;
         setStatus(data.status);
         
         // Clean sensitive data before setting
@@ -122,14 +154,44 @@ export const VerificationProvider: React.FC<{ children: ReactNode }> = ({ childr
     } finally {
       setIsLoading(false);
     }
-  }, [fetchStatusRequest]);
+  }, [stableFetchStatusRequest]);
+
+  // Setup polling if on the dashboard
+  useEffect(() => {
+    // Get user data from local storage
+    const userData = localStorage.getItem('user_data');
+    const hasUser = !!userData;
+    
+    // Only setup polling if on dashboard and authenticated
+    if (shouldPoll && hasUser) {
+      // Initial fetch
+      fetchStatus();
+      
+      // Setup polling interval at 60 seconds
+      pollingIntervalRef.current = window.setInterval(() => {
+        fetchStatus();
+      }, 60000); // 60 seconds
+      
+      return () => {
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current);
+        }
+      };
+    }
+    
+    // If not on dashboard but authenticated, just fetch once
+    if (hasUser && !shouldPoll) {
+      fetchStatus();
+    }
+  }, [fetchStatus, shouldPoll]);
 
   // Submit verification documents
   const submitDocuments = useCallback(async (formData: FormData): Promise<boolean> => {
     try {
       setIsLoading(true);
       
-      const response = await submitDocumentsRequest('', formData);
+      // Use type assertion here too
+      const response = await submitDocumentsRequest('', formData) as any;
       
       if (response?.success) {
         setStatus('pending');

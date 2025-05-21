@@ -1,3 +1,5 @@
+// consts/paths.ts
+
 export const apiBaseUrl = `${process.env.NEXT_PUBLIC_API_URL}`;
 
 // auth
@@ -19,9 +21,11 @@ export const verificationSubmitUrl = `/verification/submit`;
 // notifications
 export const notiUrl = `/notifications`;
 
-// transactions
-export const transactionsUrl = `/transactions`;
-export const transactionDetailUrl = `/transactions`;
+// **transactions**  
+// List and create: GET/POST → /api/finance/transactions  
+export const transactionsUrl = `/finance/transactions`;  
+// Detail: GET → /api/finance/transactions?id=<id>
+export const transactionDetailUrl = `/finance/transactions`;
 
 // products
 export const productsUrl = `/products`;
@@ -30,7 +34,7 @@ export const productDetailUrl = `/products`;
 // integrations
 export const webhooksUrl = `/webhooks`;
 
-// finance
+// finance (payouts, etc.)
 export const payoutsUrl = `/payouts`;
 export const payoutDetailUrl = `/payouts`;
 export const payoutAccountsUrl = `/payouts/accounts`;

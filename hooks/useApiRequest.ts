@@ -1,3 +1,6 @@
+// hooks\useApiRequest.ts
+'use client';
+
 import { useState } from 'react';
 import axios, { AxiosRequestConfig, AxiosResponse } from 'axios';
 

@@ -1,141 +1,123 @@
-import { TransactionData, TransactionDetail } from '@/types';
+// types/transaction.ts
+export type TransactionStatus = 'successful' | 'pending' | 'failed' | 'chargeback' | 'refunded' | 'canceled';
+export type PaymentMethod = 'card' | 'paypal' | 'pix' | 'wallet' | 'other';
 
-export const txDataMock: TransactionData = {
-  pagination: {
-    totalLength: 120,
-    itemsPerPage: 10,
-    pageCount: 12,
-    currentPage: 1,
-  },
-  data: [
-    {
-      date: new Date(),
-      id: 'jhdgjasdFGrsg45878',
-      card: 'mastercard',
-      customer: 'Demo Mart',
-      status: 'Succeeded',
-      amount: 145.25,
-    },
-    {
-      date: new Date(),
-      id: 'jhdgjasdFGrsg45878',
-      card: 'mastercard',
-      customer: 'Demo Mart',
-      status: 'Succeeded',
-      amount: 1435.25,
-    },
-    {
-      date: new Date(),
-      id: 'jhdgjasdFGrsg45878',
-      card: 'mastercard',
-      customer: 'Demo Mart',
-      status: 'Refunded',
-      amount: 145.25,
-    },
-    {
-      date: new Date(),
-      id: 'jhdgjasdFGrsg45878',
-      card: 'mastercard',
-      customer: 'Demo Mart',
-      status: 'Pending',
-      amount: 145.25,
-    },
-    {
-      date: new Date(),
-      id: 'jhdgjasdFGrsg45878',
-      card: 'mastercard',
-      customer: 'Demo Mart',
-      status: 'Succeeded',
-      amount: 145.25,
-    },
-    {
-      date: new Date(),
-      id: 'jhdgjasdFGrsg45878',
-      card: 'mastercard',
-      customer: 'Demo Mart',
-      status: 'Pending',
-      amount: 145.25,
-    },
-    {
-      date: new Date(),
-      id: 'jhdgjasdFGrsg45878',
-      card: 'mastercard',
-      customer: 'Demo Mart',
-      status: 'Succeeded',
-      amount: 145.25,
-    },
-    {
-      date: new Date(),
-      id: 'jhdgjasdFGrsg45878',
-      card: 'mastercard',
-      customer: 'Demo Mart',
-      status: 'Failed',
-      amount: 145.25,
-    },
-    {
-      date: new Date(),
-      id: 'jhdgjasdFGrsg45878',
-      card: 'visa',
-      customer: 'Demo Mart',
-      status: 'Succeeded',
-      amount: 145.25,
-    },
-    {
-      date: new Date(),
-      id: 'jhdgjasdFGrsg45878',
-      card: 'mastercard',
-      customer: 'Demo Mart',
-      status: 'Chargeback',
-      amount: 145.25,
-    },
-  ],
+export type Transaction = {
+  date: Date;
+  id: string;
+  card?: 'mastercard' | 'visa';
+  customer: string;
+  status: TransactionStatus;
+  amount: number;
+  method?: PaymentMethod;
+  saleCurrency?: string;
+  subtotal?: number;
+  buyerEmail?: string;
+  buyerName?: string;
+  paymentMethod?: PaymentMethod;
 };
 
-export const txDetailMock: TransactionDetail = {
-  id: 'jhdgjasdFGrsg45878',
-  amount: 145.25,
-  status: 'Succeeded',
-  createdAt: new Date(),
-  updatedAt: new Date(),
-  customer: {
-    name: 'Nur Hassan',
-    email: 'nursan@gmail.com',
-  },
-  contact: {
-    email: 'meme@gmail.com',
-    phone: '+1 (763) 2183-4555',
-  },
-  billing: {
-    address: 'Delaware, 19709, USA',
-    name: 'Nur Hasan',
-  },
-  technical: {
-    ip: '182.2.64.129',
-    device: 'Mobile (Android 11)',
-  },
-  products: [
-    {
-      name: 'Sports Wear',
-      id: '829d2r99ae9',
-      imageUrl: 'https://picsum.photos/id/227/200/300',
-      price: 20,
-      quantity: 3,
-    },
-    {
-      name: 'T-shirt',
-      id: '129d2r99ae9',
-      imageUrl: 'https://picsum.photos/id/267/200/300',
-      price: 25.25,
-      quantity: 1,
-    },
-    {
-      name: 'Luxury women watch',
-      id: '829d2r999e9',
-      imageUrl: 'https://picsum.photos/id/137/200/300',
-      price: 30,
-      quantity: 2,
-    },
-  ],
-  generatedBy: 'Shopify',
-  paymentMethod: 'Visa',
+export type TransactionData = {
+  pagination: {
+    totalLength: number;
+    itemsPerPage: number;
+    pageCount: number;
+    currentPage: number;
+  };
+  data: Transaction[];
+};
+
+export type TransactionProduct = {
+  name: string;
+  id: string;
+  imageUrl: string;
+  price: number;
+  quantity: number;
+};
+
+export type TransactionVariant = {
+  name: string;
+  value: string;
+};
+
+export type TransactionItem = {
+  productId: string;
+  productName: string;
+  productType: 'digital' | 'physical';
+  productOwnerId: string;
+  quantity: number;
+  unitPrice: number;
+  subtotal: number;
+  productCurrency: string;
+  vatEnabled: boolean;
+  vatAmount?: number;
+  variants?: TransactionVariant[];
+};
+
+export type TransactionMetadata = {
+  buyerEmail?: string;
+  buyerPhone?: string;
+  billingDetails?: {
+    name: string;
+    address: string;
+    city: string;
+    state: string;
+    postalCode: string;
+    country: string;
+  };
+  ipAddress?: string;
+  deviceInfo?: string;
+  browserInfo?: string;
+  items?: TransactionItem[];
+  localCurrency?: string;
+  localPrice?: number;
+  localSubtotal?: number;
+  localShipping?: number;
+  localTotal?: number;
+  originalCurrency?: string;
+  originalPrice?: number;
+  originalSubtotal?: number;
+  originalTotal?: number;
+};
+
+export type TransactionDetail = {
+  _id: string;
+  merchantId?: string;
+  type: 'sale' | 'refund' | 'payout_debit' | 'adjustment' | 'fee';
+  status: TransactionStatus;
+  paymentMethod: PaymentMethod;
+  originAmount: number;
+  originCurrency: string;
+  amountUSD?: number;
+  amountBRL?: number;
+  dashboardCurrencyAtTransaction?: string;
+  fxRateUsedToUSD?: number;
+  fxRateUsedToBRL?: number;
+  description?: string;
+  metadata?: TransactionMetadata;
+  processedAt: Date | string;
+  createdAt: Date | string;
+  updatedAt?: Date | string;
+  
+  // Additional fields for backwards compatibility with the UI
+  id?: string;
+  amount?: number;
+  customer?: {
+    name?: string;
+    email?: string;
+  };
+  contact?: {
+    email?: string;
+    phone?: string;
+  };
+  billing?: {
+    address?: string;
+    name?: string;
+  };
+  technical?: {
+    ip?: string;
+    device?: string;
+  };
+  products?: TransactionProduct[];
+  generatedBy?: string;
 };
