@@ -1,12 +1,37 @@
 // app/product/payment/page.tsx
-'use client';
+import React, { Suspense } from 'react';
 
-import { useEffect, useState } from 'react';
+// Loading fallback component
+const PaymentLoading = () => (
+  <div className="container mx-auto p-4 max-w-3xl">
+    <div className="bg-white shadow-md rounded-lg p-8 mt-8">
+      <div className="text-center">
+        <h1 className="text-2xl font-bold text-gray-900 mb-4">Loading payment information...</h1>
+        <div className="animate-pulse flex justify-center">
+          <div className="h-10 w-10 bg-blue-200 rounded-full"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+// Main page component with Suspense boundary
+export default function PaymentPage() {
+  return (
+    <Suspense fallback={<PaymentLoading />}>
+      <PaymentClientContent />
+    </Suspense>
+  );
+}
+
+// Client component that uses useSearchParams
+'use client';
+import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { formatDate, generateTransactionId } from '../../../productlib/utils';
 
-const PaymentResultPage = () => {
+const PaymentClientContent = () => {
   const searchParams = useSearchParams();
   const transactionId = searchParams.get('transactionId') || generateTransactionId();
   const status = searchParams.get('status') || 'successful'; // Default to successful if not provided
@@ -132,8 +157,3 @@ const PaymentResultPage = () => {
     </div>
   );
 };
-
-export default PaymentResultPage;
-
-// Force dynamic rendering to avoid static generation issues with useSearchParams
-export const dynamic = 'force-dynamic';
