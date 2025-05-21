@@ -8,7 +8,8 @@ export function middleware(request: NextRequest) {
 
   // Public routes (no auth required)
   const publicPaths = ['/', '/signin', '/signup', '/verify-email']
-  const isPublicPath = publicPaths.includes(pathname)
+  // Also allow anyone to view /product/* pages
+  const isPublicPath = publicPaths.includes(pathname) || pathname.startsWith('/product')
 
   // Onboarding routes
   const isOnboardingPath = pathname.startsWith('/onboarding')
