@@ -28,8 +28,11 @@ export const transactionsUrl = `/finance/transactions`;
 export const transactionDetailUrl = `/finance/transactions`;
 
 // products
+// products
 export const productsUrl = `/products`;
 export const productDetailUrl = `/products`;
+export const productPublicUrl = `/products/public`;
+export const productUpdateStatusUrl = `/products/:id/status`;
 
 // integrations
 export const webhooksUrl = `/webhooks`;

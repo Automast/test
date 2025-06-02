@@ -239,6 +239,7 @@ const DashLayout: React.FC<{ children: ReactNode; titleArea: ReactNode; tools?: 
               >
                 <div className="w-8 h-8 rounded-full bg-blue-500 text-white flex items-center justify-center font-medium">
                   {merchantInfo?.businessName ? getInitials(merchantInfo.businessName) : 'B'}
+                  
                 </div>
                 <div className="md:flex hidden">
                   <p className="font-medium truncate">{merchantInfo?.businessName || 'Business'}</p>
