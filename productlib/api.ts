@@ -1,5 +1,5 @@
 // productlib/api.ts
-import { ITransaction, IApiResponse, IProduct } from './types';
+import { IApiResponse, IProduct } from './types';
 
 // Always use the full backend URL from NEXT_PUBLIC_API_URL (or default to localhost:5000/api)
 const API_BASE_URL =
@@ -80,16 +80,16 @@ export const getProductBySlug = async (slug: string): Promise<IProduct | null> =
 };
 
 /**
- * Create a new transaction
+ * Create a new transaction - format data to match backend API expectations
  */
-export const createTransaction = async (transaction: ITransaction): Promise<IApiResponse<any>> => {
+export const createTransaction = async (transactionData: any): Promise<IApiResponse<any>> => {
   try {
     const url = getApiUrl('/finance/transactions');
     
     // Log transaction data for debugging (omitting sensitive info)
     console.log('Creating transaction:', {
-      ...transaction,
-      buyerEmail: transaction.buyerEmail ? '***@***.com' : undefined,
+      ...transactionData,
+      buyerEmail: transactionData.buyerEmail ? '***@***.com' : undefined,
     });
     
     // No authentication token required for public payments
@@ -100,7 +100,7 @@ export const createTransaction = async (transaction: ITransaction): Promise<IApi
     const response = await fetch(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify(transaction),
+      body: JSON.stringify(transactionData),
     });
     
     // Log response status for debugging

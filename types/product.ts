@@ -81,6 +81,13 @@ export type ProductResponse = {
   };
 };
 
+export type ShippingMethod = {
+  name: string;
+  price: number;
+  minDays: number;
+  maxDays: number;
+};
+
 export type CreateProductRequest = {
   title: string;
   shortDescription?: string;
@@ -90,6 +97,8 @@ export type CreateProductRequest = {
   currency: string;
   defaultCurrency: string;
   autoLocalPrice: boolean;
+  productSource?: 'shopify' | 'woocommerce' | 'wordpress' | 'customapi' | 'hosted' | 'others';
+  vatEnabled?: boolean;
   type: 'digital' | 'physical';
   sku?: string;
   barcode?: string;

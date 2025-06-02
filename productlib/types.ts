@@ -79,53 +79,57 @@ export interface IImage {
     country: string;
   }
   
-  export interface ITransactionItem {
-    productId: string;
-    productSlug: string;
-    productName: string;
-    productType: 'digital' | 'physical';
-    productOwnerId: string;
-    quantity: number;
-    unitPrice: number;
-    subtotal: number;
-    productCurrency: string;
-    vatEnabled: boolean;
-    vatAmount?: number;
-    variants?: IVariantSelection[];
-  }
-  
-// Define the transaction types and statuses
-export type TransactionType = 'sale' | 'refund' | 'payout_debit' | 'adjustment' | 'fee';
-export type TransactionStatus = 'successful' | 'pending' | 'canceled' | 'failed' | 'refunded' | 'others';
-
-export interface ITransaction {
-  items: ITransactionItem[];
-  productSource: 'hosted' | 'shopify' | 'woocommerce' | 'wordpress' | 'customapi' | 'others';
-  saleCurrency: string;
-  subtotal: number;
-  shippingFee?: number;
-  total: number;
-  paymentMethod: 'card' | 'pix' | 'paypal' | 'wallet' | 'other';
-  buyerEmail: string;
-  buyerPhone?: string;
-  billingName: string;
-  billingAddress: string;
-  billingCity: string;
-  billingState: string;
-  billingPostalCode: string;
-  billingCountry: string;
-  status: TransactionStatus;
-  ipAddress?: string;
-  deviceInfo?: string;
-  browserInfo?: string;
-  metadata?: Record<string, any>;
-  
-  // Added required fields to match the backend schema
-  type: TransactionType;
-  originAmount: number;
-  originCurrency: string;
+export interface ITransactionItem {
+  productId: string;
+  productSlug: string;
+  productName: string;
+  productType: 'digital' | 'physical';
+  productOwnerId: string;
+  quantity: number;
+  unitPrice: number; // Price of ONE unit in the sale currency
+  totalPrice: number;  // << CHANGED from subtotal: This should be unitPrice * quantity for THIS item line
+  currency: string;   // << CHANGED from productCurrency: Currency for THIS item line
+  vatEnabled: boolean;
+  vatAmount?: number; // VAT amount for THIS item line
+  variants?: IVariantSelection[];
 }
+  
+  // Define the transaction types and statuses
+  export type TransactionType = 'sale' | 'refund' | 'payout_debit' | 'adjustment' | 'fee';
+  export type TransactionStatus = 'successful' | 'pending' | 'canceled' | 'failed' | 'refunded' | 'others';
 
+  // Simplified transaction interface for API calls - matches backend expectations
+  export interface ITransaction {
+    items: ITransactionItem[];
+    productSource: 'hosted' | 'shopify' | 'woocommerce' | 'wordpress' | 'customapi' | 'others';
+    saleCurrency: string;
+    subtotal: number;
+    shippingFee?: number;
+    total: number;
+    paymentMethod: 'card' | 'pix' | 'paypal' | 'wallet' | 'other';
+    buyerEmail: string;
+    buyerPhone?: string;
+    billingName: string;
+    billingAddress: string;
+    billingCity: string;
+    billingState: string;
+    billingPostalCode: string;
+    billingCountry: string;
+    status: TransactionStatus;
+    ipAddress?: string;
+    deviceInfo?: string;
+    browserInfo?: string;
+    metadata?: Record<string, any>;
+    
+    // Additional fields for Stripe integration
+    useStripe?: boolean;
+    paymentIntentId?: string;
+    
+    // Legacy fields for compatibility
+    type?: TransactionType;
+    originAmount?: number;
+    originCurrency?: string;
+  }
   
   export interface ICurrency {
     code: string;

@@ -1,0 +1,1490 @@
+old code
+
+CheckoutSummary.tsx
+// productcomponents/CheckoutSummary.tsx
+'use client';
+
+import { IProduct, IVariantSelection } from '../productlib/types';
+import { formatPrice } from '../productlib/currency';
+import { calculateTotalPrice } from '../productlib/utils';
+
+interface CheckoutSummaryProps {
+  product: IProduct;
+  quantity: number;
+  variantSelections: IVariantSelection[];
+  selectedShipping?: string;
+  localCurrency?: string;
+}
+
+// Define an extended product type that explicitly includes our local currency properties
+interface ProductWithLocalCurrency extends IProduct {
+  localPrice?: number;
+  localCurrency?: string;
+}
+
+const CheckoutSummary: React.FC<CheckoutSummaryProps> = ({
+  product,
+  quantity,
+  variantSelections,
+  selectedShipping,
+  localCurrency
+}) => {
+  // Cast product to our extended type to avoid TypeScript errors
+  const productWithLocal = product as ProductWithLocalCurrency;
+  
+  // Use product local price if available, or fall back to original price
+  const displayPrice = productWithLocal.localPrice !== undefined ? productWithLocal.localPrice : product.price;
+  
+  // Use product local currency if available, or fall back to default currency
+  const displayCurrency = productWithLocal.localCurrency || 
+    (localCurrency && product.autoLocalPrice ? localCurrency : product.defaultCurrency);
+  
+  // Determine if we need to convert prices
+  const needsConversion = 
+    productWithLocal.localPrice !== undefined && 
+    productWithLocal.localCurrency !== undefined && 
+    productWithLocal.localCurrency !== product.defaultCurrency;
+  
+  // Calculate with original price first
+  const originalPrices = calculateTotalPrice(
+    product,  // Using the original product
+    quantity, 
+    selectedShipping
+  );
+  
+  // If conversion is needed, apply the same conversion rate to all components
+  let { subtotal, vat, shipping, total } = originalPrices;
+  
+  if (needsConversion && productWithLocal.localPrice !== undefined) {
+    // Calculate conversion rate based on single item price
+    const conversionRate = productWithLocal.localPrice / product.price;
+    
+    // Apply conversion to all price components
+    subtotal = parseFloat((originalPrices.subtotal * conversionRate).toFixed(2));
+    vat = parseFloat((originalPrices.vat * conversionRate).toFixed(2));
+    shipping = parseFloat((originalPrices.shipping * conversionRate).toFixed(2));
+    total = parseFloat((subtotal + vat + shipping).toFixed(2));
+  }
+  
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+      <h3 className="text-lg font-semibold text-gray-900 mb-6">Order Summary</h3>
+      
+      {/* Product Details */}
+      <div className="space-y-4 mb-6">
+        <div className="flex items-start space-x-3">
+          {/* Product Image */}
+          {product.images && product.images.length > 0 && (
+            <div className="flex-shrink-0 w-12 h-12 bg-gray-100 rounded-lg overflow-hidden">
+              <img
+                src={(() => {
+                  const url = product.images[0].url;
+                  // If it's already a full URL, use it as-is
+                  if (url.startsWith('http')) {
+                    return url;
+                  }
+                  // Make sure URLs that start with /uploads have the proper /api prefix
+                  if (url.startsWith('/uploads') && !url.startsWith('/api/uploads')) {
+                    return `/api${url}`;
+                  }
+                  // URLs that already have /api/uploads are good
+                  if (url.startsWith('/api/uploads')) {
+                    return url;
+                  }
+                  // For all other cases, ensure it has the complete path
+                  return `/api/uploads/${url.replace(/^\//, '')}`;
+                })()}
+                alt={product.title}
+                className="w-full h-full object-cover"
+              />
+            </div>
+          )}
+          
+          {/* Product Info */}
+          <div className="flex-1 min-w-0">
+            <h4 className="text-sm font-medium text-gray-900 truncate">{product.title}</h4>
+            
+            {/* Selected variants */}
+            {variantSelections.length > 0 && variantSelections.every(v => v.value) && (
+              <div className="mt-1 space-y-1">
+                {variantSelections.map((selection, index) => (
+                  <div key={index} className="text-xs text-gray-500">
+                    {selection.name}: {selection.value}
+                  </div>
+                ))}
+              </div>
+            )}
+            
+            <div className="mt-1 text-xs text-gray-500">Qty: {quantity}</div>
+          </div>
+          
+          {/* Price */}
+          <div className="text-sm font-medium text-gray-900">
+            {formatPrice(displayPrice * quantity, displayCurrency)}
+          </div>
+        </div>
+      </div>
+      
+      {/* Price Breakdown */}
+      <div className="border-t border-gray-200 pt-4 space-y-3">
+        <div className="flex justify-between text-sm">
+          <span className="text-gray-600">Subtotal</span>
+          <span className="text-gray-900">{formatPrice(subtotal, displayCurrency)}</span>
+        </div>
+        
+        {vat > 0 && (
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-600">VAT</span>
+            <span className="text-gray-900">{formatPrice(vat, displayCurrency)}</span>
+          </div>
+        )}
+        
+        {shipping > 0 && (
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-600">Shipping</span>
+            <span className="text-gray-900">{formatPrice(shipping, displayCurrency)}</span>
+          </div>
+        )}
+        
+        {shipping === 0 && selectedShipping && (
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-600">Shipping</span>
+            <span className="text-green-600 font-medium">Free</span>
+          </div>
+        )}
+      </div>
+      
+      {/* Total */}
+      <div className="border-t border-gray-200 mt-4 pt-4">
+        <div className="flex justify-between">
+          <span className="text-base font-semibold text-gray-900">Total</span>
+          <span className="text-base font-semibold text-gray-900">
+            {formatPrice(total, displayCurrency)}
+          </span>
+        </div>
+        
+        {/* Show original price if converted */}
+        {displayCurrency !== product.defaultCurrency && (
+          <div className="text-xs text-gray-500 mt-2 text-right">
+            Original: {formatPrice(product.price * quantity, product.defaultCurrency)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default CheckoutSummary;
+
+PaymentForm.tsx
+// productcomponents/PaymentForm.tsx
+'use client';
+import { useState, useEffect, FormEvent } from 'react';
+import { loadStripe, Stripe, StripeElements, StripeCardNumberElement } from '@stripe/stripe-js';
+import {
+  Elements,
+  useStripe,
+  useElements,
+  CardNumberElement,
+  CardExpiryElement,
+  CardCvcElement,
+} from '@stripe/react-stripe-js';
+import { ICountry, IState } from 'country-state-city';
+import { Country, State } from 'country-state-city';
+
+import { IBillingInfo } from '../productlib/types';
+import { isPixSupported, getUserCountry } from '../productlib/currency';
+import { validateBillingInfo } from '../productlib/utils';
+import logger from '../productlib/logger';
+
+interface PaymentFormProps {
+  currency: string;
+  amount: number; // Expected in smallest currency unit (e.g., cents)
+  transactionId: string;
+  onSubmit: (
+    billingInfo: IBillingInfo,
+    paymentMethod: 'card' | 'pix' | 'paypal' | 'wallet' | 'other',
+    status: 'pending' | 'successful' | 'canceled',
+    paymentIntentId?: string
+  ) => void;
+  isSubmitting: boolean;
+  // Add product details needed for create-intent
+  productOwnerId: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+}
+
+// Interface for CheckoutForm props
+interface CheckoutFormPropsInternal { // Renamed to avoid conflict
+  currency: string; // This is paymentDetails.currency from ProductDisplay
+  amount: number;   // This is paymentDetails.amount (smallest unit) from ProductDisplay
+  transactionId: string; // TX_...
+  onSubmit: PaymentFormProps['onSubmit'];
+  isSubmitting: boolean;
+  billingInfo: IBillingInfo;
+  setBillingInfo: (info: IBillingInfo | ((prev: IBillingInfo) => IBillingInfo)) => void;
+  errors: Record<string, string>;
+  setErrors: (errors: Record<string, string> | ((prev: Record<string, string>) => Record<string, string>)) => void;
+  // Add the new product props
+  productOwnerId: string;
+  productId: string;
+  productName: string;
+  quantityParam: number; // Renamed to avoid conflict with quantity state in ProductDisplay
+}
+
+let stripePromiseSingleton: Promise<Stripe | null> | null = null;
+
+const getStripeInstance = (): Promise<Stripe | null> => {
+  if (!stripePromiseSingleton) {
+    stripePromiseSingleton = (async () => {
+      try {
+        const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ||
+                        (process.env.NODE_ENV === 'development' ? 'http://localhost:5000' : window.location.origin);
+        
+        const apiUrl = `${baseUrl.replace(/\/api$/, '')}/api/payments/config`;
+        logger.info('[PaymentForm] Fetching payment config from:', apiUrl);
+        const response = await fetch(apiUrl);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            logger.error('[PaymentForm] Failed to fetch payment config. Status:', response.status, 'Response:', errorText);
+            return null;
+        }
+        const config = await response.json();
+        logger.info('[PaymentForm] Payment config response:', config);
+        
+        if (config.success && config.data?.processors?.stripe?.configured && config.data.processors.stripe.publicKey) {
+          logger.info('[PaymentForm] Stripe loaded successfully with key prefix:', config.data.processors.stripe.publicKey.substring(0, 20) + '...');
+          return loadStripe(config.data.processors.stripe.publicKey);
+        } else {
+          logger.error('[PaymentForm] Stripe not configured or public key missing in fetched config:', config.data?.processors?.stripe);
+          return null;
+        }
+      } catch (error) {
+        logger.error('[PaymentForm] Error loading Stripe config or initializing Stripe.js:', error);
+        return null;
+      }
+    })();
+  }
+  return stripePromiseSingleton;
+};
+
+const CARD_ELEMENT_OPTIONS = {
+  style: {
+    base: {
+      color: '#32325d',
+      fontFamily: '"Helvetica Neue", Helvetica, sans-serif',
+      fontSmoothing: 'antialiased',
+      fontSize: '16px',
+      '::placeholder': {
+        color: '#aab7c4',
+      },
+    },
+    invalid: {
+      color: '#fa755a',
+      iconColor: '#fa755a',
+    },
+  },
+  showIcon: true,
+};
+
+// Update the CheckoutForm functional component definition:
+const CheckoutForm: React.FC<CheckoutFormPropsInternal> = ({
+  currency, // This is paymentDetails.currency from ProductDisplay
+  amount,   // This is paymentDetails.amount (smallest unit) from ProductDisplay
+  transactionId, // TX_...
+  onSubmit,
+  isSubmitting,
+  billingInfo,
+  setBillingInfo,
+  errors,
+  setErrors,
+  // Destructure new props
+  productOwnerId,
+  productId,
+  productName,
+  quantityParam,
+}) => {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [paymentError, setPaymentError] = useState<string>('');
+  const [processing, setProcessing] = useState(false);
+  const [countries, setCountries] = useState<ICountry[]>([]);
+  const [states, setStates] = useState<IState[]>([]);
+  const [selectedCountry, setSelectedCountry] = useState<string>(billingInfo.country || '');
+  const [clientSecret, setClientSecret] = useState<string>('');
+  const [paymentIntentCreated, setPaymentIntentCreated] = useState(false);
+
+  useEffect(() => {
+    setCountries(Country.getAllCountries());
+  }, []);
+
+  useEffect(() => {
+    if (selectedCountry) {
+      setStates(State.getStatesOfCountry(selectedCountry));
+      if (billingInfo.country !== selectedCountry) {
+        setBillingInfo(prev => ({ ...prev, country: selectedCountry, state: '' }));
+      }
+    } else {
+      setStates([]);
+    }
+  }, [selectedCountry]);
+
+  useEffect(() => {
+    if (billingInfo.country && billingInfo.country !== selectedCountry) {
+      setSelectedCountry(billingInfo.country);
+    }
+  }, [billingInfo.country, selectedCountry]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setBillingInfo(prev => ({ ...prev, [name]: value }));
+    if (errors[name]) {
+      setErrors(prev => { const newErrors = { ...prev }; delete newErrors[name]; return newErrors; });
+    }
+  };
+
+  const handleCountryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSelectedCountry(e.target.value);
+  };
+
+  // Create payment intent only when user is ready to pay
+  const createPaymentIntent = async (): Promise<string | null> => {
+    if (paymentIntentCreated || clientSecret) {
+      return clientSecret;
+    }
+
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ||
+                      (process.env.NODE_ENV === 'development' ? 'http://localhost:5000' : window.location.origin);
+      
+      const apiUrl = `${baseUrl.replace(/\/api$/, '')}/api/payments/create-intent`;
+      
+      logger.info('[PaymentForm] Creating payment intent for transaction:', transactionId);
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount, // This is already smallest unit (e.g. cents)
+          currency: currency.toLowerCase(), // This is the currency code like 'ZAR'
+          transactionId, // The TX_... ID
+          description: `Purchase: ${productName} (x${quantityParam}) - TX: ${transactionId}`,
+          // Pass new data
+          productOwnerId: productOwnerId,
+          productId: productId,
+          productName: productName,
+          quantity: quantityParam,
+          customerEmail: billingInfo.email, // Pass customer email if available
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({message: "Failed to parse error from create-intent"}));
+        logger.error('[PaymentForm] Failed to create payment intent. Status:', response.status, 'Error:', errorData);
+        throw new Error(errorData.message || `Failed to initialize payment (HTTP ${response.status})`);
+      }
+
+      const data = await response.json();
+      if (data.success && data.data.clientSecret) {
+        logger.info('[PaymentForm] Payment intent created successfully. Client Secret (first 20):', data.data.clientSecret.substring(0,20)+'...');
+        setClientSecret(data.data.clientSecret);
+        setPaymentIntentCreated(true);
+        return data.data.clientSecret;
+      } else {
+        logger.error('[PaymentForm] Failed to get clientSecret from create-intent:', data.message || 'Unknown error', data.errors);
+        throw new Error(data.message || 'Failed to initialize payment details.');
+      }
+    } catch (error) {
+      logger.error('[PaymentForm] Error creating payment intent:', error);
+      throw error;
+    }
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setPaymentError('');
+    
+    if (!stripe || !elements) {
+      setPaymentError('Stripe has not loaded yet. Please try again.');
+      logger.warn('[CheckoutForm] handleSubmit: Stripe or Elements not ready.');
+      return;
+    }
+
+    const cardNumberElement = elements.getElement(CardNumberElement);
+    if (!cardNumberElement) {
+      setPaymentError('Card number element not ready.');
+      logger.warn('[CheckoutForm] handleSubmit: CardNumberElement not found.');
+      return;
+    }
+    
+    if (processing || isSubmitting) return;
+    setProcessing(true);
+
+    try {
+      // Validate billing info first
+      const validation = validateBillingInfo(billingInfo);
+      if (!validation.valid) {
+        setErrors(validation.errors);
+        setProcessing(false);
+        logger.info('[CheckoutForm] Billing info validation failed:', validation.errors);
+        return;
+      }
+
+      // Create payment intent only when user submits
+      let currentClientSecret = clientSecret;
+      if (!currentClientSecret) {
+        currentClientSecret = await createPaymentIntent();
+        if (!currentClientSecret) {
+          setPaymentError('Failed to initialize payment. Please try again.');
+          setProcessing(false);
+          return;
+        }
+      }
+      
+      logger.info('[CheckoutForm] Attempting to create PaymentMethod...');
+      const { error: createPmError, paymentMethod } = await stripe.createPaymentMethod({
+        type: 'card',
+        card: cardNumberElement,
+        billing_details: {
+          name: billingInfo.name,
+          email: billingInfo.email,
+          phone: billingInfo.phone,
+          address: {
+            line1: billingInfo.address,
+            city: billingInfo.city,
+            state: billingInfo.state,
+            postal_code: billingInfo.postalCode,
+            country: billingInfo.country,
+          },
+        },
+      });
+
+      if (createPmError) {
+        logger.error('[CheckoutForm] createPaymentMethod failed:', createPmError);
+        setPaymentError(createPmError.message || 'Failed to process payment details.');
+        onSubmit(billingInfo, 'card', 'canceled');
+        setProcessing(false);
+        return;
+      }
+      logger.info('[CheckoutForm] PaymentMethod created:', paymentMethod.id);
+
+      logger.info('[CheckoutForm] Confirming card payment with clientSecret (first 20 chars):', currentClientSecret.substring(0,20)+'...');
+      const { error: confirmError, paymentIntent } = await stripe.confirmCardPayment(currentClientSecret, {
+        payment_method: paymentMethod.id,
+      });
+
+      if (confirmError) {
+        logger.error('[CheckoutForm] Payment confirmation failed:', confirmError);
+        setPaymentError(confirmError.message || 'Payment failed. Please try again.');
+        onSubmit(billingInfo, 'card', 'canceled', paymentIntent ? paymentIntent.id : undefined);
+      } else if (paymentIntent) {
+        logger.info('[CheckoutForm] Payment intent after confirmation:', paymentIntent.id, 'Status:', paymentIntent.status);
+        let status: 'pending' | 'successful' | 'canceled' = 'pending';
+        if (paymentIntent.status === 'succeeded') status = 'successful';
+        else if (paymentIntent.status === 'canceled') status = 'canceled';
+        else if (['requires_action', 'requires_confirmation', 'processing'].includes(paymentIntent.status)) status = 'pending';
+        
+        onSubmit(billingInfo, 'card', status, paymentIntent.id);
+      }
+    } catch (err: any) {
+      logger.error('[CheckoutForm] Unexpected error during payment submission:', err);
+      setPaymentError('An unexpected error occurred. Please try again.');
+      onSubmit(billingInfo, 'card', 'canceled');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-8">
+      {/* Contact Information */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold text-gray-900">Contact information</h3>
+        <div>
+          <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+          <input type="email" name="email" id="email" value={billingInfo.email} onChange={handleInputChange} className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${errors.email ? 'border-red-300' : 'border-gray-300'}`} placeholder="Enter your email" disabled={isSubmitting || processing} />
+          {errors.email && <p className="mt-1 text-xs text-red-600">{errors.email}</p>}
+        </div>
+        <div>
+          <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-1">Phone number (optional)</label>
+          <input type="tel" name="phone" id="phone" value={billingInfo.phone} onChange={handleInputChange} className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${errors.phone ? 'border-red-300' : 'border-gray-300'}`} placeholder="Enter your phone number" disabled={isSubmitting || processing} />
+          {errors.phone && <p className="mt-1 text-xs text-red-600">{errors.phone}</p>}
+        </div>
+      </div>
+
+      {/* Billing Address */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold text-gray-900">Billing address</h3>
+        <div>
+          <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">Full name</label>
+          <input type="text" name="name" id="name" value={billingInfo.name} onChange={handleInputChange} className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${errors.name ? 'border-red-300' : 'border-gray-300'}`} placeholder="Enter your full name" disabled={isSubmitting || processing} />
+          {errors.name && <p className="mt-1 text-xs text-red-600">{errors.name}</p>}
+        </div>
+        <div>
+          <label htmlFor="address" className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+          <input type="text" name="address" id="address" value={billingInfo.address} onChange={handleInputChange} className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${errors.address ? 'border-red-300' : 'border-gray-300'}`} placeholder="Street address" disabled={isSubmitting || processing} />
+          {errors.address && <p className="mt-1 text-xs text-red-600">{errors.address}</p>}
+        </div>
+        <div>
+          <label htmlFor="country" className="block text-sm font-medium text-gray-700 mb-1">Country</label>
+          <select name="country" id="country" value={selectedCountry} onChange={handleCountryChange} className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${errors.country ? 'border-red-300' : 'border-gray-300'}`} disabled={isSubmitting || processing}>
+            <option value="">Select Country</option>
+            {countries.map((country) => (<option key={country.isoCode} value={country.isoCode}>{country.name}</option>))}
+          </select>
+          {errors.country && <p className="mt-1 text-xs text-red-600">{errors.country}</p>}
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="md:col-span-2">
+            <label htmlFor="city" className="block text-sm font-medium text-gray-700 mb-1">City</label>
+            <input type="text" name="city" id="city" value={billingInfo.city} onChange={handleInputChange} className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${errors.city ? 'border-red-300' : 'border-gray-300'}`} placeholder="City" disabled={isSubmitting || processing} />
+            {errors.city && <p className="mt-1 text-xs text-red-600">{errors.city}</p>}
+          </div>
+          <div>
+            <label htmlFor="postalCode" className="block text-sm font-medium text-gray-700 mb-1">Postal code</label>
+            <input type="text" name="postalCode" id="postalCode" value={billingInfo.postalCode} onChange={handleInputChange} className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${errors.postalCode ? 'border-red-300' : 'border-gray-300'}`} placeholder="Postal code" disabled={isSubmitting || processing} />
+            {errors.postalCode && <p className="mt-1 text-xs text-red-600">{errors.postalCode}</p>}
+          </div>
+        </div>
+        {states.length > 0 ? (
+          <div>
+            <label htmlFor="state" className="block text-sm font-medium text-gray-700 mb-1">State / Province</label>
+            <select name="state" id="state" value={billingInfo.state} onChange={handleInputChange} className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${errors.state ? 'border-red-300' : 'border-gray-300'}`} disabled={isSubmitting || processing || states.length === 0}>
+              <option value="">Select State / Province</option>
+              {states.map((s) => (<option key={s.isoCode} value={s.isoCode}>{s.name}</option>))}
+            </select>
+            {errors.state && <p className="mt-1 text-xs text-red-600">{errors.state}</p>}
+          </div>
+        ) : selectedCountry ? (
+            <div>
+              <label htmlFor="state" className="block text-sm font-medium text-gray-700 mb-1">State / Province (if applicable)</label>
+              <input type="text" name="state" id="state" value={billingInfo.state} onChange={handleInputChange} className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${errors.state ? 'border-red-300' : 'border-gray-300'}`} placeholder="State or Province" disabled={isSubmitting || processing} />
+              {errors.state && (<p className="mt-1 text-xs text-red-600">{errors.state}</p>)}
+            </div>
+        ) : null}
+      </div>
+
+      {/* Payment Information */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold text-gray-900">Payment details</h3>
+        <div className="p-4 border border-gray-300 rounded-lg space-y-3 bg-gray-50">
+          <div>
+            <label htmlFor="cardNumber" className="block text-xs font-medium text-gray-600 mb-1">Card Number</label>
+            <div className="p-3 border border-gray-300 rounded-md bg-white focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent">
+              <CardNumberElement id="cardNumber" options={CARD_ELEMENT_OPTIONS} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="cardExpiry" className="block text-xs font-medium text-gray-600 mb-1">Expiration Date</label>
+              <div className="p-3 border border-gray-300 rounded-md bg-white focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent">
+                <CardExpiryElement id="cardExpiry" options={CARD_ELEMENT_OPTIONS} />
+              </div>
+            </div>
+            <div>
+              <label htmlFor="cardCvc" className="block text-xs font-medium text-gray-600 mb-1">CVC</label>
+              <div className="p-3 border border-gray-300 rounded-md bg-white focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent">
+                <CardCvcElement id="cardCvc" options={CARD_ELEMENT_OPTIONS} />
+              </div>
+            </div>
+          </div>
+        </div>
+        {paymentError && (
+          <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3 text-center">
+            {paymentError}
+          </div>
+        )}
+      </div>
+      
+      <button type="submit" disabled={isSubmitting || processing || !stripe || !elements} className={`w-full py-3 px-4 rounded-lg font-medium text-white transition-colors ${isSubmitting || processing || !stripe || !elements ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}>
+        {isSubmitting || processing ? (
+          <div className="flex items-center justify-center space-x-2">
+            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+            <span>Processing...</span>
+          </div>
+        ) : (
+          `Pay ${new Intl.NumberFormat(undefined, { style: 'currency', currency: currency.toUpperCase() }).format(amount / 100)}`
+        )}
+      </button>
+      
+      <div className="flex items-center justify-center space-x-2 text-xs text-gray-500">
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+        <span>Your payment information is secure and encrypted.</span>
+      </div>
+    </form>
+  );
+};
+
+// Update the main PaymentForm component to accept and pass down the new props:
+const PaymentForm: React.FC<PaymentFormProps> = ({ 
+  currency, 
+  amount,
+  transactionId,
+  onSubmit,
+  isSubmitting,
+  // Receive new props
+  productOwnerId,
+  productId,
+  productName,
+  quantity
+}) => {
+  const [billingInfo, setBillingInfo] = useState<IBillingInfo>({
+    email: '', phone: '', name: '', address: '', city: '', state: '', postalCode: '', country: '',
+  });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [stripeApiPromise, setStripeApiPromise] = useState<Promise<Stripe | null> | null>(null);
+  const [stripeError, setStripeError] = useState<string>('');
+
+  const pixSupported = isPixSupported(currency);
+
+  useEffect(() => {
+    const detectCountry = async () => {
+      try {
+        const countryIsoCode = await getUserCountry();
+        logger.info("[PaymentForm] Detected user country:", countryIsoCode);
+        setBillingInfo(prev => ({ ...prev, country: countryIsoCode }));
+      } catch (error) {
+        logger.error('[PaymentForm] Error detecting country:', error);
+        setBillingInfo(prev => ({ ...prev, country: 'US' }));
+      }
+    };
+    detectCountry();
+  }, []);
+
+  useEffect(() => {
+    logger.info('[PaymentForm] Initializing Stripe.js promise.');
+    setStripeApiPromise(getStripeInstance());
+  }, []);
+
+  if (stripeError) {
+    return (
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="text-center">
+          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          </div>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">Payment Unavailable</h3>
+          <p className="text-gray-600 mb-4">{stripeError}</p>
+          <button onClick={() => window.location.reload()} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">Try Again</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!stripeApiPromise) {
+    return (
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="animate-pulse space-y-4">
+          <div className="h-4 bg-gray-200 rounded w-1/3 mb-2"></div>
+          <div className="space-y-3">
+            <div className="h-10 bg-gray-200 rounded"></div>
+            <div className="h-10 bg-gray-200 rounded"></div>
+          </div>
+           <div className="h-4 bg-gray-200 rounded w-1/4 mt-4 mb-2"></div>
+          <div className="h-32 bg-gray-200 rounded"></div>
+          <div className="h-12 bg-gray-200 rounded mt-4"></div>
+           <p className="text-center text-sm text-gray-500 pt-2">Loading payment form...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+      <Elements stripe={stripeApiPromise}>
+        <CheckoutForm
+          currency={currency}
+          amount={amount}
+          transactionId={transactionId}
+          onSubmit={onSubmit}
+          isSubmitting={isSubmitting}
+          billingInfo={billingInfo}
+          setBillingInfo={setBillingInfo}
+          errors={errors}
+          setErrors={setErrors}
+          // Pass new props down
+          productOwnerId={productOwnerId}
+          productId={productId}
+          productName={productName}
+          quantityParam={quantity} // Pass as quantityParam
+        />
+      </Elements>
+    </div>
+  );
+};
+
+export default PaymentForm;
+
+ProductDisplay.tsx
+// productcomponents/ProductDisplay.tsx
+'use client';
+
+import { useState, useEffect, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
+import { IProduct, IVariantSelection, IBillingInfo, ITransactionItem } from '../productlib/types';
+import { formatPrice, getUserCurrency, convertPrice } from '../productlib/currency';
+import { isProductInStock, calculateTotalPrice, generateTransactionId as generateFrontendTxId } from '../productlib/utils';
+import { createTransaction, getIPAddress, getDeviceInfo } from '../productlib/api';
+import ProductImages from './ProductImages';
+import VariantSelector from './VariantSelector';
+import QuantitySelector from './QuantitySelector';
+import CheckoutSummary from './CheckoutSummary';
+import PaymentForm from './PaymentForm';
+
+interface ProductWithLocalCurrency extends IProduct {
+  localPrice?: number;
+  localCurrency?: string;
+}
+
+interface ProductDisplayProps {
+  product: IProduct;
+}
+
+const ProductDisplay: React.FC<ProductDisplayProps> = ({ product: initialProduct }) => {
+  const router = useRouter();
+  const [product, setProduct] = useState<ProductWithLocalCurrency>(initialProduct);
+  const [isLoading, setIsLoading] = useState(true);
+  const [localCurrency, setLocalCurrency] = useState<string>('');
+  const [quantity, setQuantity] = useState(1);
+  const [variantSelections, setVariantSelections] = useState<IVariantSelection[]>([]);
+  const [selectedShipping, setSelectedShipping] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string>('');
+  const [transactionId, setTransactionId] = useState<string>('');
+
+  useEffect(() => {
+    // Generate transaction ID early
+    setTransactionId(generateFrontendTxId());
+    
+    const fetchUserCurrencyAndProductDetails = async () => {
+      try {
+        setIsLoading(true);
+        const currency = await getUserCurrency();
+        setLocalCurrency(currency);
+        
+        if (currency && currency !== initialProduct.defaultCurrency && initialProduct.autoLocalPrice) {
+          try {
+            const convertedPrice = await convertPrice(initialProduct.price, initialProduct.defaultCurrency, currency);
+            setProduct({ ...initialProduct, localPrice: convertedPrice, localCurrency: currency });
+          } catch (convError) {
+            console.error('[ProductDisplay] Error converting price:', convError);
+            setProduct(initialProduct);
+          }
+        } else {
+          setProduct(initialProduct);
+        }
+      } catch (error) {
+        console.error('[ProductDisplay] Error fetching user currency:', error);
+        setLocalCurrency(initialProduct.defaultCurrency);
+        setProduct(initialProduct);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    fetchUserCurrencyAndProductDetails();
+
+    if (initialProduct.type === 'physical' && initialProduct.physical?.shippingMethods?.length) {
+      setSelectedShipping(initialProduct.physical.shippingMethods[0].name);
+    }
+  }, [initialProduct]);
+
+  const paymentDetails = useMemo(() => {
+    // Calculate total in the original product's default currency first
+    const originalPrices = calculateTotalPrice(
+      initialProduct, // Always use initialProduct for base calculation
+      quantity,
+      selectedShipping
+    );
+
+    // Determine the currency to be used for display and payment
+    const displayCurrencyCode = product.localCurrency || initialProduct.defaultCurrency;
+    let finalTotalMainUnit = originalPrices.total;
+    let finalCurrencyCode = initialProduct.defaultCurrency;
+
+    // Check if conversion to a local currency is applicable and desired
+    if (
+      displayCurrencyCode !== initialProduct.defaultCurrency &&
+      product.localPrice !== undefined && // This is the converted unit price
+      product.localCurrency === displayCurrencyCode && // Ensure product's localCurrency is set and matches display
+      initialProduct.autoLocalPrice // Check if auto conversion is enabled
+    ) {
+      // Calculate conversion rate based on the single item's converted price
+      const conversionRate = product.localPrice / initialProduct.price;
+      
+      // Apply conversion to all components of the price
+      const convertedSubtotal = originalPrices.subtotal * conversionRate;
+      const convertedVat = originalPrices.vat * conversionRate;
+      const convertedShipping = originalPrices.shipping * conversionRate;
+      
+      finalTotalMainUnit = parseFloat((convertedSubtotal + convertedVat + convertedShipping).toFixed(2));
+      finalCurrencyCode = displayCurrencyCode;
+    } else {
+      // If no conversion, use the total calculated in the product's default currency
+      finalTotalMainUnit = originalPrices.total;
+      finalCurrencyCode = initialProduct.defaultCurrency;
+    }
+
+    // Amount for Stripe must be in the smallest currency unit (e.g., cents, pence)
+    const finalTotalSmallestUnit = Math.round(finalTotalMainUnit * 100);
+
+    return {
+      amount: finalTotalSmallestUnit,
+      currency: finalCurrencyCode,
+    };
+  }, [product, initialProduct, quantity, selectedShipping]);
+
+  const canPurchase = isProductInStock(product, variantSelections);
+
+  const handleSubmit = async (
+    billingInfo: IBillingInfo,
+    paymentMethod: 'card' | 'pix' | 'paypal' | 'wallet' | 'other',
+    statusFromStripe: 'pending' | 'successful' | 'canceled',
+    paymentIntentIdFromStripe?: string
+  ) => {
+    if (!transactionId) {
+      console.error("[ProductDisplay] handleSubmit: transactionId is missing.");
+      setErrorMessage("A transaction ID is missing. Please refresh and try again.");
+      setIsSubmitting(false);
+      return;
+    }
+    
+    console.log(`[ProductDisplay] handleSubmit. PaymentProvider Status: ${statusFromStripe}, PI_ID: ${paymentIntentIdFromStripe}, App TxID: ${transactionId}, Qty: ${quantity}`);
+    
+    setIsSubmitting(true);
+    setErrorMessage('');
+      
+    try {
+      const { deviceInfo, browserInfo } = getDeviceInfo();
+      const ipAddress = await getIPAddress();
+      
+      const originalPrices = calculateTotalPrice(
+        initialProduct,
+        quantity,
+        selectedShipping
+      );
+
+      let txUnitPrice = initialProduct.price;
+      let txSaleCurrency = initialProduct.defaultCurrency;
+      let lineItemSubtotalWithoutVat = originalPrices.subtotal; // This is unitPrice * quantity in default currency
+      let lineItemVat = originalPrices.vat; // VAT on that subtotal
+
+      const useLocalForTx = product.localCurrency &&
+        product.localCurrency !== initialProduct.defaultCurrency &&
+        initialProduct.autoLocalPrice &&
+        product.localPrice !== undefined;
+
+      if (useLocalForTx && product.localPrice) {
+        const conversionRate = product.localPrice / initialProduct.price;
+        txUnitPrice = product.localPrice;
+        txSaleCurrency = product.localCurrency!;
+        lineItemSubtotalWithoutVat = parseFloat((originalPrices.subtotal * conversionRate).toFixed(2));
+        lineItemVat = parseFloat((originalPrices.vat * conversionRate).toFixed(2));
+      }
+      
+      // Grand total calculations (for the top-level transaction document)
+      let txGrandSubtotal = lineItemSubtotalWithoutVat; // For a single product line, this is the same
+      let txGrandVat = lineItemVat;
+      let txGrandShipping = originalPrices.shipping; // Assuming shipping is for the whole order
+      
+      if (useLocalForTx && product.localPrice) {
+         const conversionRate = product.localPrice / initialProduct.price;
+         txGrandShipping = parseFloat((originalPrices.shipping * conversionRate).toFixed(2));
+      }
+      let txGrandTotal = parseFloat((txGrandSubtotal + txGrandVat + txGrandShipping).toFixed(2));
+
+
+      // Prepare items array in the format expected by backend
+      const items: ITransactionItem[] = [{ // Ensure ITransactionItem matches the modified type
+        productId: initialProduct._id,
+        productSlug: initialProduct.slug,
+        productName: initialProduct.title,
+        productType: initialProduct.type,
+        productOwnerId: initialProduct.merchantId || '',
+        quantity: quantity,
+        unitPrice: txUnitPrice, // Unit price in the sale currency
+        totalPrice: lineItemSubtotalWithoutVat, // Total for this line item (unitPrice * quantity) in sale currency
+        currency: txSaleCurrency, // Currency for this line item
+        vatEnabled: initialProduct.vatEnabled,
+        vatAmount: lineItemVat, // VAT for this line item
+        variants: variantSelections.length > 0 ? variantSelections : undefined,
+      }];
+
+      const transactionData = {
+        items,
+        saleCurrency: txSaleCurrency, // Overall sale currency
+        total: txGrandTotal,         // Overall total for the transaction
+        subtotal: txGrandSubtotal,   // Overall subtotal for the transaction
+        shippingFee: txGrandShipping,  // Overall shipping
+        paymentMethod,
+        buyerEmail: billingInfo.email,
+        buyerPhone: billingInfo.phone || '',
+        billingName: billingInfo.name,
+        billingAddress: billingInfo.address,
+        billingCity: billingInfo.city,
+        billingState: billingInfo.state,
+        billingPostalCode: billingInfo.postalCode,
+        billingCountry: billingInfo.country,
+        ipAddress: ipAddress || '127.0.0.1',
+        deviceInfo: deviceInfo || 'Unknown Device',
+        browserInfo: browserInfo || 'Unknown Browser',
+        status: statusFromStripe,
+        
+        ...(paymentMethod === 'card' && {
+          useStripe: true,
+          paymentIntentId: paymentIntentIdFromStripe,
+        }),
+        
+        metadata: {
+          transactionId: transactionId, // The TX_... ID
+          client_quantity: quantity,
+          client_selectedShipping: selectedShipping,
+          client_variantSelections: variantSelections,
+          client_localCurrencyAttempt: localCurrency, // The currency the user saw
+          stripe_charged_amount_smallest_unit: paymentDetails.amount, // Amount sent to Stripe (cents)
+          stripe_charged_currency: paymentDetails.currency, // Currency sent to Stripe
+          initial_product_price: initialProduct.price,
+          initial_product_currency: initialProduct.defaultCurrency,
+          auto_local_price_setting: initialProduct.autoLocalPrice,
+          converted_unit_local_price: product.localPrice,
+          converted_local_currency: product.localCurrency,
+          productSource: initialProduct.productSource || 'hosted',
+        },
+      };
+      
+      console.log('[ProductDisplay] Creating/Updating transaction with data for backend:', JSON.stringify(transactionData, null, 2));
+      const response = await createTransaction(transactionData);
+      
+      if (response.success && response.data?.transactionId) {
+        const finalStatus = response.data.transaction?.status || statusFromStripe;
+        console.log(`[ProductDisplay] Backend transaction successful. TxID: ${response.data.transactionId}, Final Status: ${finalStatus}`);
+        
+        // Always redirect to payment status page with our transaction ID
+        router.push(`/product/payment?transactionId=${transactionId}&status=${finalStatus}`);
+      } else {
+        console.error('[ProductDisplay] Failed to process transaction on backend:', response.message, response.errors);
+        const backendErrorMsg = response.errors ? 
+          (typeof response.errors === 'string' ? response.errors : JSON.stringify(response.errors)) : 
+          response.message;
+        throw new Error(backendErrorMsg || 'Failed to process transaction on backend.');
+      }
+    } catch (error) {
+      console.error('[ProductDisplay] Error submitting transaction:', error);
+      setErrorMessage((error as Error).message || 'An unexpected error occurred during final submission.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+  
+  const renderAvailabilityMessage = () => {
+    if (product.type === 'digital') {
+      return (
+        <div className="text-green-600 flex items-center text-sm">
+          <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
+          <span>Digital Product • Instant Delivery</span>
+        </div>
+      );
+    }
+    
+    if (product.variants && product.variants.length > 0 && !variantSelections.every(v => v.value)) {
+      return (
+        <div className="text-gray-500 text-sm">
+          Please select options to check availability
+        </div>
+      );
+    }
+    
+    if (product.physical?.stock !== undefined) {
+      if (product.physical.stock <= 0) {
+        return (
+          <div className="text-red-600 flex items-center text-sm">
+            <div className="w-2 h-2 bg-red-500 rounded-full mr-2"></div>
+            <span>Out of Stock</span>
+          </div>
+        );
+      }
+      if (product.physical.stock < 10) {
+        return (
+          <div className="text-amber-600 flex items-center text-sm">
+            <div className="w-2 h-2 bg-amber-500 rounded-full mr-2"></div>
+            <span>Low Stock • Only {product.physical.stock} left</span>
+          </div>
+        );
+      }
+      return (
+        <div className="text-green-600 flex items-center text-sm">
+          <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
+          <span>In Stock • Ready to Ship</span>
+        </div>
+      );
+    }
+    
+    return (
+      <div className="text-gray-500 text-sm">Availability information unavailable</div>
+    );
+  };
+  
+  const renderShippingOptions = () => {
+    if (
+      product.type === 'physical' && 
+      product.physical?.shippingMethods && 
+      product.physical.shippingMethods.length > 0 
+    ) {
+      return (
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-gray-900">Shipping Method</label>
+          <select
+            value={selectedShipping}
+            onChange={(e) => setSelectedShipping(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          >
+            {product.physical.shippingMethods.map((method, index) => (
+              <option key={index} value={method.name}>
+                {method.name} {method.price > 0 
+                  ? `(${formatPrice(method.price, product.defaultCurrency)})` 
+                  : '(Free)'}
+              </option>
+            ))}
+          </select>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  const renderCurrencyInfo = () => {
+    if (
+      !isLoading && 
+      product.localCurrency && 
+      product.localCurrency !== product.defaultCurrency && 
+      product.autoLocalPrice 
+    ) {
+      return (
+        <div className="text-xs text-gray-500 mt-1">
+          Price shown in {product.localCurrency} based on current exchange rates. 
+          Original price: {formatPrice(product.price, product.defaultCurrency)} 
+        </div>
+      );
+    }
+    return null;
+  };
+
+  if (isLoading || !transactionId) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <div className="bg-white border-b border-gray-200">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+            <div className="animate-pulse">
+              <div className="h-8 bg-gray-200 rounded w-1/2 mb-2"></div>
+              <div className="h-4 bg-gray-200 rounded w-1/4"></div>
+            </div>
+          </div>
+        </div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-pulse">
+            <div className="space-y-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <div className="aspect-square bg-gray-200 rounded-lg"></div>
+              </div>
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <div className="h-6 bg-gray-200 rounded w-1/3 mb-4"></div>
+                <div className="space-y-2">
+                  <div className="h-4 bg-gray-200 rounded"></div>
+                  <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+                </div>
+              </div>
+            </div>
+            <div className="space-y-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <div className="h-32 bg-gray-200 rounded"></div>
+              </div>
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <div className="h-48 bg-gray-200 rounded"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="bg-white border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold text-gray-900">{product.title}</h1>
+              {renderAvailabilityMessage()}
+            </div>
+            <div className="text-right">
+              <div className="text-2xl font-semibold text-gray-900">
+                {formatPrice(
+                  product.localPrice ?? product.price,
+                  product.localCurrency || product.defaultCurrency
+                )}
+              </div>
+              {renderCurrencyInfo()}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <ProductImages images={product.images} />
+            </div>
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-3">Product Details</h2>
+              <p className="text-gray-600 mb-4">{product.shortDescription}</p>
+              <div className="prose prose-sm max-w-none text-gray-600" 
+                   dangerouslySetInnerHTML={{ __html: product.longDescription }} />
+            </div>
+          </div>
+          
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <div className="space-y-6">
+                {product.variants && product.variants.length > 0 && (
+                  <VariantSelector
+                    variants={product.variants}
+                    onVariantSelect={setVariantSelections}
+                  />
+                )}
+                <QuantitySelector
+                  product={product}
+                  quantity={quantity}
+                  onQuantityChange={setQuantity}
+                />
+                {renderShippingOptions()}
+              </div>
+            </div>
+            
+            <CheckoutSummary
+              product={product}
+              quantity={quantity}
+              variantSelections={variantSelections}
+              selectedShipping={selectedShipping}
+              localCurrency={product.localCurrency}
+            />
+            
+            {errorMessage && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <div className="flex">
+                  <div className="flex-shrink-0">
+                    <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div className="ml-3">
+                    <p className="text-sm text-red-800">{errorMessage}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {!canPurchase && product.type === 'physical' && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <div className="flex">
+                  <div className="flex-shrink-0">
+                    <svg className="h-5 w-5 text-amber-400" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div className="ml-3">
+                    <p className="text-sm text-amber-800">
+                      This product is currently out of stock or unavailable with the selected options.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {canPurchase && !isLoading && transactionId && initialProduct && (
+              <PaymentForm
+                currency={paymentDetails.currency}
+                amount={paymentDetails.amount}
+                transactionId={transactionId}
+                onSubmit={handleSubmit}
+                isSubmitting={isSubmitting}
+                productOwnerId={initialProduct.merchantId || ''}
+                productId={initialProduct._id}
+                productName={initialProduct.title}
+                quantity={quantity}
+              />
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default ProductDisplay;
+
+ProductImages.tsx
+// productcomponents/ProductImages.tsx
+'use client';
+
+import { useState } from 'react';
+import { IImage } from '../productlib/types';
+
+interface ProductImagesProps {
+  images: IImage[];
+}
+
+const ProductImages: React.FC<ProductImagesProps> = ({ images }) => {
+  // Find main image or use first image as default
+  const mainImage = images.find(img => img.isMain) || images[0];
+  const [selectedImage, setSelectedImage] = useState<string>(mainImage?.url || '');
+  
+  if (!images || images.length === 0) {
+    return (
+      <div className="aspect-square bg-gray-100 flex items-center justify-center rounded-lg">
+        <div className="text-center">
+          <svg className="w-12 h-12 text-gray-400 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+          <span className="text-gray-500 text-sm">No images available</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Format the image URL to ensure it starts with /api/uploads if needed
+  const formatImageUrl = (url: string): string => {
+    // If it's already a full URL, use it as-is
+    if (url.startsWith('http')) {
+      return url;
+    }
+    
+    // Make sure URLs that start with /uploads have the proper /api prefix
+    if (url.startsWith('/uploads') && !url.startsWith('/api/uploads')) {
+      return `/api${url}`;
+    }
+    
+    // URLs that already have /api/uploads are good
+    if (url.startsWith('/api/uploads')) {
+      return url;
+    }
+    
+    // For all other cases, ensure it has the complete path
+    return `/api/uploads/${url.replace(/^\//, '')}`;
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Main image display */}
+      <div className="aspect-square bg-gray-50 rounded-lg overflow-hidden border border-gray-200">
+        <img
+          src={formatImageUrl(selectedImage)}
+          alt="Product"
+          className="w-full h-full object-contain hover:scale-105 transition-transform duration-300"
+        />
+      </div>
+      
+      {/* Thumbnails */}
+      {images.length > 1 && (
+        <div className="flex space-x-2 overflow-x-auto py-1">
+          {images.map((image, index) => (
+            <button
+              key={index}
+              className={`flex-shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition-all duration-200 ${
+                selectedImage === image.url 
+                  ? 'border-blue-500 ring-2 ring-blue-200' 
+                  : 'border-gray-200 hover:border-gray-300'
+              }`}
+              onClick={() => setSelectedImage(image.url)}
+            >
+              <img
+                src={formatImageUrl(image.url)}
+                alt={`Thumbnail ${index + 1}`}
+                className="w-full h-full object-cover"
+              />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default ProductImages;
+
+QuantitySelector.tsx
+// productcomponents/QuantitySelector.tsx
+'use client';
+
+import { IProduct } from '../productlib/types';
+
+interface QuantitySelectorProps {
+  product: IProduct;
+  quantity: number;
+  onQuantityChange: (quantity: number) => void;
+  maxQuantity?: number;
+  minQuantity?: number;
+}
+
+const QuantitySelector: React.FC<QuantitySelectorProps> = ({
+  product,
+  quantity,
+  onQuantityChange,
+  maxQuantity = 99,
+  minQuantity = 1
+}) => {
+  // Determine actual max quantity based on stock if applicable
+  let actualMaxQuantity = maxQuantity;
+  
+  if (product.type === 'physical' && product.physical?.stock !== undefined) {
+    actualMaxQuantity = Math.min(maxQuantity, product.physical.stock);
+  }
+  
+  const handleQuantityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newQuantity = parseInt(e.target.value, 10);
+    
+    if (isNaN(newQuantity)) {
+      onQuantityChange(minQuantity);
+    } else {
+      const clampedQuantity = Math.max(
+        minQuantity,
+        Math.min(newQuantity, actualMaxQuantity)
+      );
+      onQuantityChange(clampedQuantity);
+    }
+  };
+  
+  const decreaseQuantity = () => {
+    if (quantity > minQuantity) {
+      onQuantityChange(quantity - 1);
+    }
+  };
+  
+  const increaseQuantity = () => {
+    if (quantity < actualMaxQuantity) {
+      onQuantityChange(quantity + 1);
+    }
+  };
+  
+  return (
+    <div className="space-y-2">
+      <label className="text-sm font-medium text-gray-900">Quantity</label>
+      <div className="flex items-center">
+        <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden">
+          <button
+            type="button"
+            className="px-4 py-2 bg-gray-50 text-gray-600 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={decreaseQuantity}
+            disabled={quantity <= minQuantity}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+            </svg>
+          </button>
+          <input
+            type="number"
+            min={minQuantity}
+            max={actualMaxQuantity}
+            value={quantity}
+            onChange={handleQuantityChange}
+            className="w-16 text-center border-0 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <button
+            type="button"
+            className="px-4 py-2 bg-gray-50 text-gray-600 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={increaseQuantity}
+            disabled={quantity >= actualMaxQuantity}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+            </svg>
+          </button>
+        </div>
+        
+        {product.type === 'physical' && product.physical?.stock !== undefined && (
+          <span className="text-sm text-gray-500 ml-3">
+            {product.physical.stock} available
+          </span>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default QuantitySelector;
+
+VariantSelector.tsx
+// productcomponents/VariantSelector.tsx
+'use client';
+
+import { useState, useEffect } from 'react';
+import { IVariant, IVariantSelection } from '../productlib/types';
+
+interface VariantSelectorProps {
+  variants: IVariant[];
+  onVariantSelect: (selections: IVariantSelection[]) => void;
+}
+
+const VariantSelector: React.FC<VariantSelectorProps> = ({ variants, onVariantSelect }) => {
+  const [selections, setSelections] = useState<IVariantSelection[]>([]);
+  
+  // Initialize with empty selections
+  useEffect(() => {
+    if (variants && variants.length > 0) {
+      // Create initial selections with empty values
+      const initialSelections = variants.map(variant => ({
+        name: variant.name,
+        value: '',
+      }));
+      setSelections(initialSelections);
+    }
+  }, [variants]);
+  
+  // Update parent component when selections change
+  useEffect(() => {
+    if (selections.length > 0) {
+      onVariantSelect(selections);
+    }
+  }, [selections, onVariantSelect]);
+  
+  if (!variants || variants.length === 0) {
+    return null;
+  }
+  
+  const handleVariantChange = (variantName: string, value: string) => {
+    const newSelections = selections.map(selection => 
+      selection.name === variantName 
+        ? { ...selection, value } 
+        : selection
+    );
+    setSelections(newSelections);
+  };
+  
+  return (
+    <div className="space-y-4">
+      {variants.map((variant, index) => (
+        <div key={index} className="space-y-2">
+          <label className="text-sm font-medium text-gray-900">
+            {variant.name}
+          </label>
+          <select
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            value={selections.find(s => s.name === variant.name)?.value || ''}
+            onChange={(e) => handleVariantChange(variant.name, e.target.value)}
+          >
+            <option value="">Select {variant.name}</option>
+            {variant.values.map((value, valueIndex) => (
+              <option key={valueIndex} value={value}>
+                {value}
+              </option>
+            ))}
+          </select>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+export default VariantSelector;
+

@@ -196,9 +196,8 @@ import {
   };
   
   /**
-   * Generate a random transaction ID (for demo)
+   * Generate a random transaction ID (matching original pattern)
    */
   export const generateTransactionId = (): string => {
-    return Math.random().toString(36).substring(2, 15) + 
-           Math.random().toString(36).substring(2, 15);
+    return `TX_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`.toUpperCase();
   };

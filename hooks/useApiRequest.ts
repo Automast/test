@@ -71,16 +71,29 @@ export const useApiRequest = <T extends { message?: string; data?: any; [key: st
 return res.data;
     } catch (err: any) {
       if (axios.isAxiosError(err)) {
-        setError(err.response?.data ?? err);
+        const errorData = err.response?.data ?? {
+          message: err.message || 'Network error occurred'
+        };
+        setError(errorData);
+        throw errorData; // Re-throw for proper error handling
       } else {
-        setError({
+        const errorObj = {
           message: err.message ?? 'Something went wrong!',
-        } as T);
+        } as T;
+        setError(errorObj);
+        throw errorObj;
       }
     } finally {
       setLoading(false);
     }
   };
 
-  return { response, error, loading, sendRequest };
+  // Reset function to clear state
+  const reset = () => {
+    setResponse(null);
+    setError(null);
+    setLoading(false);
+  };
+
+  return { response, error, loading, sendRequest, reset };
 };
