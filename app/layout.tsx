@@ -7,6 +7,9 @@ import './globals.css';
 import 'react-loading-skeleton/dist/skeleton.css';
 import 'react-toastify/dist/ReactToastify.css';
 
+// In your layout.tsx or _document.tsx, add this to the <head> section:
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+
 const geistSans = Geist({
   variable: '--font-geist-sans',
   subsets: ['latin'],

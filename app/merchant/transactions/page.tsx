@@ -25,7 +25,7 @@ import { ITEMS_PER_PAGE } from '@/consts/vars';
 import { useApiRequest } from '@/hooks';
 import { transactionsUrl } from '@/consts/paths';
 import Toaster from '@/helpers/Toaster';
-import { Transaction, TransactionData } from '@/types';
+import { TransactionListItem, TransactionData, TransactionStatus, PaymentMethod } from '@/types'; // Updated import
 import { txStatusStyles } from '@/consts/styles';
 
 // Payment method icons mapping
@@ -65,15 +65,15 @@ const TransactionPage = () => {
 
   // Filter states
   const [statusFilter, setStatusFilter] = useState<
-    'All' | 'successful' | 'failed' | 'pending' | 'chargeback' | 'refunded'
+    'All' | TransactionStatus // Use TransactionStatus type
   >('All');
-  const [methodFilter, setMethodFilter] = useState<string | undefined>(undefined);
+  const [methodFilter, setMethodFilter] = useState<PaymentMethod | undefined>(undefined); // Use PaymentMethod type
   const [dateFilter, setDateFilter] = useState<string | undefined>(undefined);
   const [currencyFilter, setCurrencyFilter] = useState<'USD' | 'BRL' | undefined>(undefined);
   const [amountFilter, setAmountFilter] = useState<string | undefined>(undefined);
   const [searchTerm, setSearchTerm] = useState('');
   const [showRefundModal, setShowRefundModal] = useState(false);
-  const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
+  const [selectedTx, setSelectedTx] = useState<TransactionListItem | null>(null); // Use TransactionListItem
 
   // Sorting
   const [sortField, setSortField] = useState<string>('processedAt');
@@ -83,14 +83,14 @@ const TransactionPage = () => {
   const [currentPage, setCurrentPage] = useState(1);
   
   // Data states
-  const [txData, setTxData] = useState<TransactionData>({
+  const [txData, setTxData] = useState<TransactionData>({ // Use TransactionData type
     pagination: {
       totalLength: 0,
       itemsPerPage: 0,
       pageCount: 0,
       currentPage: 1,
     },
-    data: [] as Transaction[],
+    data: [] as TransactionListItem[], // Use TransactionListItem array
   });
   const [isLoading, setIsLoading] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
@@ -115,13 +115,13 @@ const TransactionPage = () => {
 
     if (statusFilter !== 'All') params.status = statusFilter;
     if (methodFilter) params.paymentMethod = methodFilter;
-    if (dateFilter) params.date = dateFilter;
+    if (dateFilter) params.date = dateFilter; // Backend should handle date string parsing
     if (searchTerm) params.search = searchTerm;
     
     // Handle currency and amount filters
     if (currencyFilter && amountFilter) {
-      params.currency = currencyFilter;
-      params.amount = amountFilter;
+      params.currency = currencyFilter; // Send currency to backend if amount filter is used
+      params.amountRange = amountFilter; // Send range string like "0-100"
     }
 
     return params;
@@ -139,11 +139,11 @@ const TransactionPage = () => {
       Authorization: `Bearer ${getToken()}`,
     },
     method: 'GET',
-    params: buildRequestParams(),
+    // Params will be dynamically set in useEffect
   });
 
   // Handle status filter change
-  const handleStatusFilter = (status: 'All' | 'successful' | 'failed' | 'pending' | 'chargeback' | 'refunded') => {
+  const handleStatusFilter = (status: 'All' | TransactionStatus) => {
     setStatusFilter(status);
     setCurrentPage(1);
   };
@@ -168,7 +168,7 @@ const TransactionPage = () => {
   };
 
   // Handle method filter
-  const handleMethodFilter = (method: string | undefined) => {
+  const handleMethodFilter = (method: PaymentMethod | undefined) => {
     setMethodFilter(method);
     setCurrentPage(1);
   };
@@ -209,9 +209,12 @@ const TransactionPage = () => {
   // Fetch data on filter or pagination changes
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      sendTxRequest();
+      // Rebuild params before sending request
+      const currentParams = buildRequestParams();
+      sendTxRequest(undefined, undefined, currentParams); // Pass params to sendRequest
     }
-  }, [
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ 
     statusFilter, methodFilter, dateFilter, 
     currencyFilter, amountFilter, searchTerm,
     currentPage, sortField, sortOrder
@@ -223,25 +226,29 @@ const TransactionPage = () => {
       if (txResponse.success && txResponse.data) {
         const payload = txResponse.data as any;
         
-        // Normalize the data structure to handle different API response formats
-        const transactions = payload.transactions || payload.data || [];
-        const normalizedTransactions = transactions.map((tx: any) => ({
-          id: tx._id || tx.id || '',
+        const transactionsFromApi = payload.transactions || payload.data || [];
+        const normalizedTransactions: TransactionListItem[] = transactionsFromApi.map((tx: any) => ({
+          id: tx.transactionId || tx._id,
           date: new Date(tx.processedAt || tx.createdAt || Date.now()),
-          method: tx.paymentMethod || 'card',
-          customer: tx.metadata?.billingDetails?.name || tx.customer?.name || tx.metadata?.buyerEmail || 'Anonymous',
-          status: tx.status || 'pending',
-          amount: tx.originAmount || tx.amount || 0,
-          saleCurrency: tx.originCurrency || tx.currency || 'USD',
+          status: tx.status as TransactionStatus || 'pending',
+          
+          // Use 'total' if available, otherwise 'originAmount'. For list display, this is usually the customer-facing amount.
+          amount: tx.total !== undefined ? tx.total : (tx.originAmount || 0),
+          // Use 'saleCurrency' if available, otherwise 'originCurrency'.
+          saleCurrency: tx.saleCurrency || tx.originCurrency || 'USD',
+          
+          // Customer identification: prioritize billingName, then buyerEmail
+          customer: tx.billingName || tx.buyerEmail || 'Anonymous',
+          
+          method: tx.paymentMethod as PaymentMethod || 'card',
+          
+          // Include specific currency amounts if they exist, for potential filtering/display logic
           amountUSD: tx.amountUSD,
           amountBRL: tx.amountBRL,
-          subtotal: tx.metadata?.localSubtotal || tx.subtotal || tx.originAmount || 0,
-          buyerEmail: tx.metadata?.buyerEmail || '',
-          buyerName: tx.metadata?.billingDetails?.name || '',
-          paymentMethod: tx.paymentMethod || 'card',
+          buyerEmail: tx.buyerEmail, // Retain for full object if needed
         }));
 
-        const mapped = {
+        const mappedData: TransactionData = {
           data: normalizedTransactions,
           pagination: {
             totalLength: payload.total || payload.pagination?.totalLength || 0,
@@ -251,16 +258,11 @@ const TransactionPage = () => {
           },
         };
 
-        setTxData(mapped);
+        setTxData(mappedData);
       } else {
         Toaster.error(txResponse.message || 'Failed to load transactions');
         setTxData({
-          pagination: {
-            totalLength: 0,
-            itemsPerPage: ITEMS_PER_PAGE,
-            pageCount: 0,
-            currentPage: 1,
-          },
+          pagination: { totalLength: 0, itemsPerPage: ITEMS_PER_PAGE, pageCount: 0, currentPage: 1 },
           data: [],
         });
       }
@@ -273,12 +275,7 @@ const TransactionPage = () => {
     if (txError) {
       Toaster.error(txError?.message || 'Failed to load transactions');
       setTxData({
-        pagination: {
-          totalLength: 0,
-          itemsPerPage: ITEMS_PER_PAGE,
-          pageCount: 0,
-          currentPage: 1,
-        },
+        pagination: { totalLength: 0, itemsPerPage: ITEMS_PER_PAGE, pageCount: 0, currentPage: 1 },
         data: [],
       });
       setIsLoading(false);
@@ -294,30 +291,33 @@ const TransactionPage = () => {
         router.push('/signin');
         return;
       }
-      sendTxRequest();
+      // Initial request uses params from buildRequestParams
+      const initialParams = buildRequestParams();
+      sendTxRequest(undefined, undefined, initialParams);
     }
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty dependency array for initial load
 
   // Display payment method with icon
-  const renderPaymentMethod = (method: string) => {
-    const icon = paymentMethodIcons[method.toLowerCase()] || null;
+  const renderPaymentMethod = (method?: PaymentMethod) => { // method can be undefined
+    const methodKey = method?.toLowerCase() || 'card'; // Default to 'card' if undefined
+    const icon = paymentMethodIcons[methodKey] || paymentMethodIcons['card']; // Fallback to card icon
   
     return (
       <div className="flex items-center justify-center h-full w-full">
-        {icon && <Image src={icon} alt={method} className="w-5 h-5" />}
+        {icon && <Image src={icon} alt={method || 'Card'} className="w-5 h-5" />}
       </div>
     );
   };
   
-
   // Render the amount based on filter settings
-  const renderAmount = (transaction: Transaction) => {
+  const renderAmount = (transaction: TransactionListItem) => {
     if (currencyFilter === 'USD' && transaction.amountUSD !== undefined) {
       return currencyFormatter(transaction.amountUSD, 'USD');
     } else if (currencyFilter === 'BRL' && transaction.amountBRL !== undefined) {
       return currencyFormatter(transaction.amountBRL, 'BRL');
     } else {
-      // Default to transaction's original currency
+      // Default to transaction's primary display amount and currency
       return currencyFormatter(transaction.amount, transaction.saleCurrency || 'USD');
     }
   };
@@ -339,19 +339,22 @@ const TransactionPage = () => {
     { value: '1000+', label: 'Over 1000' }
   ];
 
-  const methodOptions = [
+  const methodOptions: {value: PaymentMethod, label: string}[] = [
     { value: 'card', label: 'Card' },
     { value: 'paypal', label: 'PayPal' },
     { value: 'pix', label: 'PIX' }
   ];
 
-  const statusOptions = [
+  const statusOptions: {value: 'All' | TransactionStatus, label: string}[] = [
     { value: 'All', label: 'All Status' },
     { value: 'successful', label: 'Successful' },
     { value: 'pending', label: 'Pending' },
     { value: 'failed', label: 'Failed' },
     { value: 'chargeback', label: 'Chargeback' },
-    { value: 'refunded', label: 'Refunded' }
+    { value: 'refunded', label: 'Refunded' },
+    { value: 'canceled', label: 'Canceled' },
+    { value: 'partial_refund', label: 'Partial Refund' },
+    { value: 'disputed', label: 'Disputed' },
   ];
 
   // Render sort indicator
@@ -395,7 +398,7 @@ const TransactionPage = () => {
               <input
                 ref={searchInputRef}
                 type="text"
-                placeholder="Search by ID, customer name..."
+                placeholder="Search by ID, customer name/email..."
                 className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md"
                 defaultValue={searchTerm}
                 onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
@@ -420,8 +423,7 @@ const TransactionPage = () => {
                 {showFilters ? 'Hide Filters' : 'Filters'}
                 {hasActiveFilters() && !showFilters && (
                   <span className="ml-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-blue-100 text-xs text-blue-600">
-                    {statusFilter !== 'All' && methodFilter !== undefined && dateFilter !== undefined ? '3+' : 
-                      [statusFilter !== 'All', methodFilter !== undefined, dateFilter !== undefined, 
+                    {[statusFilter !== 'All', methodFilter !== undefined, dateFilter !== undefined, 
                        currencyFilter !== undefined, amountFilter !== undefined, searchTerm !== '']
                       .filter(Boolean).length}
                   </span>
@@ -429,11 +431,15 @@ const TransactionPage = () => {
               </button>
               
               <button
-                onClick={() => sendTxRequest()}
+                onClick={() => {
+                    const currentParams = buildRequestParams();
+                    sendTxRequest(undefined, undefined, currentParams);
+                }}
                 className="flex items-center px-3 py-2 text-sm font-medium rounded-md border border-gray-300 text-gray-700"
                 title="Refresh"
+                disabled={txLoading || isLoading}
               >
-                <RefreshCw size={16} className={`${txLoading ? 'animate-spin' : ''}`} />
+                <RefreshCw size={16} className={`${(txLoading || isLoading) ? 'animate-spin' : ''}`} />
               </button>
               
               {hasActiveFilters() && (
@@ -473,7 +479,7 @@ const TransactionPage = () => {
                 <label className="block text-xs font-medium text-gray-500 mb-1">Payment Method</label>
                 <select
                   value={methodFilter || ''}
-                  onChange={(e) => handleMethodFilter(e.target.value || undefined)}
+                  onChange={(e) => handleMethodFilter(e.target.value as PaymentMethod || undefined)}
                   className="w-full p-2 border border-gray-300 rounded-md bg-white"
                 >
                   <option value="">All Methods</option>
@@ -551,7 +557,7 @@ const TransactionPage = () => {
           <div className="flex flex-wrap gap-2 px-4 py-2 bg-gray-50 border-b border-gray-200">
             {statusFilter !== 'All' && (
               <div className="flex items-center px-2 py-1 text-xs font-medium rounded-md bg-blue-50 text-blue-700">
-                Status: {statusFilter}
+                Status: {statusOptions.find(o => o.value === statusFilter)?.label || statusFilter}
                 <button 
                   onClick={() => setStatusFilter('All')} 
                   className="ml-1 text-blue-400 hover:text-blue-600"
@@ -563,7 +569,7 @@ const TransactionPage = () => {
             
             {methodFilter && (
               <div className="flex items-center px-2 py-1 text-xs font-medium rounded-md bg-blue-50 text-blue-700">
-                Method: {methodFilter}
+                Method: {methodOptions.find(o => o.value === methodFilter)?.label || methodFilter}
                 <button 
                   onClick={() => setMethodFilter(undefined)} 
                   className="ml-1 text-blue-400 hover:text-blue-600"
@@ -646,10 +652,10 @@ const TransactionPage = () => {
                 <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   <button 
                     className="flex items-center font-medium" 
-                    onClick={() => handleSort('_id')}
+                    onClick={() => handleSort('transactionId')} // Sort by transactionId
                   >
                     Transaction ID
-                    {renderSortIndicator('_id')}
+                    {renderSortIndicator('transactionId')}
                   </button>
                 </th>
                 <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -676,10 +682,10 @@ const TransactionPage = () => {
                 <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   <button 
                     className="flex items-center font-medium" 
-                    onClick={() => handleSort(currencyFilter === 'USD' ? 'amountUSD' : currencyFilter === 'BRL' ? 'amountBRL' : 'originAmount')}
+                    onClick={() => handleSort(currencyFilter === 'USD' ? 'amountUSD' : currencyFilter === 'BRL' ? 'amountBRL' : 'total')} // Sort by total or specific currency amount
                   >
                     Amount
-                    {renderSortIndicator(currencyFilter === 'USD' ? 'amountUSD' : currencyFilter === 'BRL' ? 'amountBRL' : 'originAmount')}
+                    {renderSortIndicator(currencyFilter === 'USD' ? 'amountUSD' : currencyFilter === 'BRL' ? 'amountBRL' : 'total')}
                   </button>
                 </th>
                 <th scope="col" className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -714,25 +720,25 @@ const TransactionPage = () => {
               ) : (
                 txData.data.map((transaction, index) => (
                   <tr 
-                    key={transaction.id || index}
+                    key={transaction.id || index} // Use transaction.id which should be unique backend _id or transactionId
                     className="hover:bg-gray-50 cursor-pointer"
-                    onClick={() => router.push(`/merchant/transactions/${transaction.id}`)}
+                    onClick={() => router.push(`/merchant/transactions/${transaction.id}`)} // Use the correct ID for navigation
                   >
                     <td className="px-4 py-3 whitespace-nowrap text-sm">
                       {formatDate(transaction.date)}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-mono">
-                      {transaction.id}
+                      {transaction.id} {/* This should be the TX_... or _id */}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm">
                       {transaction.customer}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm">
-                      {renderPaymentMethod(transaction.method || 'card')}
+                      {renderPaymentMethod(transaction.method)}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <span className={`px-2 py-1 inline-flex text-xs leading-5 font-medium rounded-full ${
-                        txStatusStyles[transaction.status]
+                        txStatusStyles[transaction.status.toLowerCase()] || txStatusStyles['pending'] // Use lowercase for matching and fallback
                       }`}>
                         {transaction.status}
                       </span>
@@ -836,7 +842,7 @@ const TransactionPage = () => {
                     const token = localStorage.getItem('jwt_token');
                     const base = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
                     const res = await fetch(
-                      `${base}/finance/transactions/${selectedTx!.id}/refund`,
+                      `${base}/finance/transactions/${selectedTx!.id}/refund`, // Use selectedTx.id which is the backend _id
                       {
                         method: 'POST',
                         headers: {
@@ -849,7 +855,8 @@ const TransactionPage = () => {
                     if (data.success) {
                       Toaster.success('Refund processed');
                       setShowRefundModal(false);
-                      sendTxRequest(); // refresh list
+                      const currentParams = buildRequestParams(); // Re-fetch with current filters
+                      sendTxRequest(undefined, undefined, currentParams);
                     } else {
                       Toaster.error(data.message || 'Refund failed');
                     }

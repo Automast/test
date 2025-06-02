@@ -319,7 +319,8 @@ const Dashboard = () => {
       titleArea={
         <>
           <h2 className="text-xl font-semibold">
-            Hello, {merchantData?.businessName || 'Business'}
+          Hello, {(merchantData?.firstName || merchantData?.businessName || 'Merchant')
+  .replace(/^./, (c) => c.toUpperCase())}
           </h2>
           <p className="text-sm text-gray-500">
             {dateLabel}
@@ -564,10 +565,12 @@ const Dashboard = () => {
           <div className="p-4 bg-white rounded-xl space-y-4">
             <div className="flex justify-between items-start">
               <div>
-                <h4 className="text-[#777B84] font-semibold my-1">Total Balance (USD)</h4>
-                <p className="text-xl font-semibold my-2">{formatCurrency(balances?.USD?.totalBalance || 0, 'USD')}</p>
+                <h4 className="text-[#777B84] font-semibold my-1">Available Balance (USD)</h4>
+                <p className={`text-xl font-semibold my-2 ${ (balances?.USD?.available || 0) < 0 ? 'text-red-500' : '' }`}>
+                  {formatCurrency(balances?.USD?.available || 0, 'USD')}
+                </p>
                 <p className="text-[#BEBEBE] my-1 truncate overflow-hidden whitespace-nowrap text-sm">
-                  Total Balance in USD
+                  Available balance in USD
                 </p>
               </div>
               <Link
@@ -582,10 +585,12 @@ const Dashboard = () => {
 
             <div className="flex justify-between items-start">
               <div>
-                <h4 className="text-[#777B84] font-semibold my-1">Total Balance (BRL)</h4>
-                <p className="text-xl font-semibold my-2">{formatCurrency(balances?.BRL?.totalBalance || 0, 'BRL')}</p>
+                <h4 className="text-[#777B84] font-semibold my-1">Available Balance (BRL)</h4>
+                <p className={`text-xl font-semibold my-2 ${ (balances?.BRL?.available || 0) < 0 ? 'text-red-500' : '' }`}>
+                  {formatCurrency(balances?.BRL?.available || 0, 'BRL')}
+                </p>
                 <p className="text-[#BEBEBE] my-1 truncate overflow-hidden whitespace-nowrap text-sm">
-                  Total Balance in BRL
+                  Available balance in BRL
                 </p>
               </div>
               <Link
@@ -597,7 +602,7 @@ const Dashboard = () => {
             </div>
           </div>
 
-          {/* Account Status Section */}
+          {/* Account Status Section ... */}
           <div className="p-4 bg-white rounded-xl">
             <h4 className="font-semibold text-[#090E18] mb-1 text-base">Account status</h4>
             <p className="text-sm text-[#BEBEBE] mb-4 truncate overflow-hidden whitespace-nowrap">

@@ -1,6 +1,6 @@
+// app/product/[slug]/page.tsx
 'use client';
 
-// app/product/[slug]/page.tsx
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { getProductBySlug } from '../../../productlib/api';
@@ -45,47 +45,151 @@ export default function ProductPage() {
 
   if (loading) {
     return (
-      <main className="container mx-auto p-4 max-w-6xl">
-        <div className="animate-pulse">
-          <div className="h-8 bg-gray-200 rounded w-3/4 mb-4"></div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div className="h-96 bg-gray-200 rounded"></div>
-            <div className="space-y-4">
-              <div className="h-6 bg-gray-200 rounded w-1/2"></div>
-              <div className="h-4 bg-gray-200 rounded w-1/4"></div>
-              <div className="h-24 bg-gray-200 rounded"></div>
-              <div className="h-10 bg-gray-200 rounded w-1/3"></div>
-            </div>
+      <>
+        <style jsx>{`
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+          
+          .loading-container {
+            min-height: 100vh;
+            background-color: #f6f9fc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+          }
+          
+          .loading-card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            padding: 40px;
+            text-align: center;
+            max-width: 400px;
+            width: 100%;
+          }
+          
+          .loading-spinner {
+            width: 32px;
+            height: 32px;
+            border: 3px solid #635bff;
+            border-top: 3px solid transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+          }
+          
+          .loading-text {
+            color: #32325d;
+            font-size: 16px;
+            font-weight: 500;
+          }
+        `}</style>
+        
+        <div className="loading-container">
+          <div className="loading-card">
+            <div className="loading-spinner"></div>
+            <div className="loading-text">Loading product...</div>
           </div>
         </div>
-      </main>
+      </>
     );
   }
 
   if (error || !product) {
     return (
-      <main className="container mx-auto p-4 max-w-6xl">
-        <div className="text-center py-12">
-          <h1 className="text-2xl font-bold text-gray-800 mb-4">
-            {error || 'Product Not Found'}
-          </h1>
-          <p className="text-gray-600 mb-8">
-            We couldn't find the product you're looking for.
-          </p>
-          <a 
-            href="/" 
-            className="inline-block px-6 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
-          >
-            Return to Homepage
-          </a>
+      <>
+        <style jsx>{`
+          .error-container {
+            min-height: 100vh;
+            background-color: #f6f9fc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+          }
+          
+          .error-card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            padding: 40px;
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+          }
+          
+          .error-icon {
+            width: 64px;
+            height: 64px;
+            background: #ef4444;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 24px;
+          }
+          
+          .error-title {
+            font-size: 24px;
+            font-weight: 600;
+            color: #32325d;
+            margin-bottom: 12px;
+          }
+          
+          .error-message {
+            color: #6b7c93;
+            font-size: 16px;
+            margin-bottom: 24px;
+            line-height: 1.5;
+          }
+          
+          .error-button {
+            display: inline-block;
+            width: 100%;
+            padding: 14px 20px;
+            background: #0073E6;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.15s;
+            text-decoration: none;
+            text-align: center;
+          }
+          
+          .error-button:hover {
+            background: #0066CC;
+          }
+        `}</style>
+        
+        <div className="error-container">
+          <div className="error-card">
+            <div className="error-icon">
+              <i className="fas fa-exclamation-triangle" style={{color: 'white', fontSize: '24px'}}></i>
+            </div>
+            
+            <h1 className="error-title">
+              {error || 'Product Not Found'}
+            </h1>
+            <p className="error-message">
+              We couldn't find the product you're looking for. It may have been removed or is temporarily unavailable.
+            </p>
+            
+            <a href="/" className="error-button">
+              Return to Homepage
+            </a>
+          </div>
         </div>
-      </main>
+      </>
     );
   }
 
-  return (
-    <main className="container mx-auto p-4 max-w-6xl">
-      <ProductDisplay product={product} />
-    </main>
-  );
+  return <ProductDisplay product={product} />;
 }

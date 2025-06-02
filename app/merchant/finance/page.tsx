@@ -195,11 +195,12 @@ const FinancePage = () => {
   };
 
   // Get current balance for selected currency
+
   const getCurrentBalance = () => {
     if (!balances || !balances[currentCurrency]) {
-      return { totalBalance: 0, available: 0, reserve: 0 };
+      return { totalBalance: 0, available: 0, reserve: 0, pending: 0 }; // Added pending: 0
     }
-    return balances[currentCurrency];
+    return balances[currentCurrency]; // This already includes 'pending' from the API
   };
 
   const currentBalance = getCurrentBalance();
@@ -277,9 +278,9 @@ const FinancePage = () => {
           currency={currentCurrency}
         />
         <BalanceCard
-          icon={chartIcon}
-          label="Total Balance"
-          amount={currentBalance.totalBalance || 0}
+          icon={chartIcon} // Icon remains the same, can be changed if desired
+          label="Pending Balance"
+          amount={currentBalance.pending || 0} // Changed from totalBalance to pending
           currency={currentCurrency}
         />
         <BalanceCard
