@@ -227,26 +227,40 @@ const TransactionPage = () => {
         const payload = txResponse.data as any;
         
         const transactionsFromApi = payload.transactions || payload.data || [];
-        const normalizedTransactions: TransactionListItem[] = transactionsFromApi.map((tx: any) => ({
-          id: tx.transactionId || tx._id,
-          date: new Date(tx.processedAt || tx.createdAt || Date.now()),
-          status: tx.status as TransactionStatus || 'pending',
-          
-          // Use 'total' if available, otherwise 'originAmount'. For list display, this is usually the customer-facing amount.
-          amount: tx.total !== undefined ? tx.total : (tx.originAmount || 0),
-          // Use 'saleCurrency' if available, otherwise 'originCurrency'.
-          saleCurrency: tx.saleCurrency || tx.originCurrency || 'USD',
-          
-          // Customer identification: prioritize billingName, then buyerEmail
-          customer: tx.billingName || tx.buyerEmail || 'Anonymous',
-          
-          method: tx.paymentMethod as PaymentMethod || 'card',
-          
-          // Include specific currency amounts if they exist, for potential filtering/display logic
-          amountUSD: tx.amountUSD,
-          amountBRL: tx.amountBRL,
-          buyerEmail: tx.buyerEmail, // Retain for full object if needed
-        }));
+const normalizedTransactions: TransactionListItem[] = transactionsFromApi.map((tx: any) => {
+          // --- MODIFICATION START ---
+          // Determine the base amount (total excluding VAT)
+          const baseAmount = tx.total !== undefined ? tx.total : (tx.originAmount || 0);
+          
+          // Safely get the VAT from metadata, default to 0
+          const vatAmount = tx.metadata?.vat || 0;
+
+          // Calculate the display amount by adding VAT to the base amount
+          const displayAmount = baseAmount + vatAmount;
+          // --- MODIFICATION END ---
+
+          return {
+            id: tx.transactionId || tx._id,
+            date: new Date(tx.processedAt || tx.createdAt || Date.now()),
+            status: tx.status as TransactionStatus || 'pending',
+            
+            // Use the new calculated displayAmount
+            amount: displayAmount,
+            
+            // Use 'saleCurrency' if available, otherwise 'originCurrency'.
+            saleCurrency: tx.saleCurrency || tx.originCurrency || 'USD',
+            
+            // Customer identification: prioritize billingName, then buyerEmail
+            customer: tx.billingName || tx.buyerEmail || 'Anonymous',
+            
+            method: tx.paymentMethod as PaymentMethod || 'card',
+            
+            // Include specific currency amounts if they exist, for potential filtering/display logic
+            amountUSD: tx.amountUSD,
+            amountBRL: tx.amountBRL,
+            buyerEmail: tx.buyerEmail, // Retain for full object if needed
+          };
+        });
 
         const mappedData: TransactionData = {
           data: normalizedTransactions,

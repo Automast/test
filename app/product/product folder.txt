@@ -1,13 +1,12 @@
-// app/product/payment/PaymentResultComponent.tsx
-
+payment/page.tsx
+// app/product/payment/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { formatDate } from '../../../productlib/utils'; // Ensure this path is correct
+import { formatDate } from '../../../productlib/utils';
 
-// Define the Transaction interface based on your updated structure
 interface Transaction {
   _id: string;
   transactionId: string;
@@ -31,21 +30,22 @@ interface Transaction {
   };
 }
 
-const PaymentResultComponent = () => {
+const PaymentResultPage = () => {
   const searchParams = useSearchParams();
   const transactionId = searchParams.get('transactionId');
   const [transaction, setTransaction] = useState<Transaction | null>(null);
-  const [loading, setLoading] = useState(true); // This loading state is for data fetching *within* the component
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchTransactionStatus = async () => {
     if (!transactionId) {
-      setError('No transaction ID provided in the URL.');
+      setError('No transaction ID provided');
       setLoading(false);
       return;
     }
 
     try {
+      // Try to fetch by transactionId first
       const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ||
                       (process.env.NODE_ENV === 'development' ? 'http://localhost:5000' : window.location.origin);
       
@@ -57,20 +57,18 @@ const PaymentResultComponent = () => {
         const data = await response.json();
         if (data.success && data.data) {
           setTransaction(data.data);
-          setError(null); // Clear any previous error
+          setError(null);
         } else {
-          // Handle cases where the API returns success: false or data is null
-          setError(data.message || 'Transaction not found.');
+          setError('Transaction not found');
         }
       } else if (response.status === 404) {
-        setError('Transaction not found.');
+        setError('Transaction not found');
       } else {
-        // Handle other HTTP errors
-        setError(`Failed to fetch transaction status: ${response.statusText}`);
+        setError('Failed to fetch transaction status');
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Error fetching transaction:', err);
-      setError(`An unexpected error occurred: ${err.message}`);
+      setError('Failed to fetch transaction status');
     } finally {
       setLoading(false);
     }
@@ -81,19 +79,13 @@ const PaymentResultComponent = () => {
     
     // Poll for status updates every 3 seconds for pending transactions
     const interval = setInterval(() => {
-      // Only poll if transaction exists and is pending
       if (transaction?.status === 'pending') {
-         fetchTransactionStatus();
-      } else if (transaction?.status && transaction?.status !== 'pending') {
-         // If status is no longer pending, clear the interval
-         clearInterval(interval);
+        fetchTransactionStatus();
       }
-      // If transaction is null (e.g., initial load or error), polling won't start/continue
     }, 3000);
 
-    // Cleanup interval on component unmount or when transaction status changes
     return () => clearInterval(interval);
-  }, [transactionId, transaction?.status]); // Add transaction?.status to dependencies
+  }, [transactionId, transaction?.status]);
 
   // Define UI elements based on status
   const getStatusContent = (status: string) => {
@@ -104,22 +96,21 @@ const PaymentResultComponent = () => {
             <div style={{
               width: '64px',
               height: '64px',
-              background: '#10b981', // green-500
+              background: '#10b981',
               borderRadius: '50%',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               margin: '0 auto 24px'
             }}>
-              {/* Font Awesome check icon */}
               <i className="fas fa-check" style={{color: 'white', fontSize: '24px'}}></i>
             </div>
           ),
           title: 'Payment successful',
           message: 'Thank you for your purchase! Your order has been confirmed and you should receive an email receipt shortly.',
-          bgColor: '#f0fdf4', // green-50
-          borderColor: '#bbf7d0', // green-200
-          textColor: '#16a34a' // green-600
+          bgColor: '#f0fdf4',
+          borderColor: '#bbf7d0',
+          textColor: '#16a34a'
         };
       case 'pending':
         return {
@@ -127,46 +118,44 @@ const PaymentResultComponent = () => {
             <div style={{
               width: '64px',
               height: '64px',
-              background: '#f59e0b', // amber-500
+              background: '#f59e0b',
               borderRadius: '50%',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               margin: '0 auto 24px'
             }}>
-               {/* Font Awesome clock icon */}
               <i className="fas fa-clock" style={{color: 'white', fontSize: '24px'}}></i>
             </div>
           ),
           title: 'Payment pending',
           message: 'Your payment is being processed. We\'ll send you a confirmation email once the payment is complete.',
-          bgColor: '#fffbeb', // amber-50
-          borderColor: '#fde68a', // amber-200
-          textColor: '#d97706' // amber-600
+          bgColor: '#fffbeb',
+          borderColor: '#fde68a',
+          textColor: '#d97706'
         };
       case 'canceled':
-      case 'cancelled': // Support both spellings
+      case 'cancelled':
         return {
           icon: (
             <div style={{
               width: '64px',
               height: '64px',
-              background: '#ef4444', // red-500
+              background: '#ef4444',
               borderRadius: '50%',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               margin: '0 auto 24px'
             }}>
-               {/* Font Awesome times icon */}
               <i className="fas fa-times" style={{color: 'white', fontSize: '24px'}}></i>
             </div>
           ),
           title: 'Payment canceled',
           message: 'Your payment was canceled. If this was a mistake, you can try again or contact our support team for assistance.',
-          bgColor: '#fef2f2', // red-50
-          borderColor: '#fecaca', // red-200
-          textColor: '#dc2626' // red-600
+          bgColor: '#fef2f2',
+          borderColor: '#fecaca',
+          textColor: '#dc2626'
         };
       case 'failed':
         return {
@@ -174,55 +163,50 @@ const PaymentResultComponent = () => {
             <div style={{
               width: '64px',
               height: '64px',
-              background: '#ef4444', // red-500
+              background: '#ef4444',
               borderRadius: '50%',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               margin: '0 auto 24px'
             }}>
-              {/* Font Awesome exclamation triangle icon */}
               <i className="fas fa-exclamation-triangle" style={{color: 'white', fontSize: '24px'}}></i>
             </div>
           ),
           title: 'Payment failed',
           message: 'Your payment could not be processed. Please try again or use a different payment method.',
-          bgColor: '#fef2f2', // red-50
-          borderColor: '#fecaca', // red-200
-          textColor: '#dc2626' // red-600
+          bgColor: '#fef2f2',
+          borderColor: '#fecaca',
+          textColor: '#dc2626'
         };
-      default: // For any other unexpected status
+      default:
         return {
           icon: (
             <div style={{
               width: '64px',
               height: '64px',
-              background: '#6b7280', // gray-500
+              background: '#6b7280',
               borderRadius: '50%',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               margin: '0 auto 24px'
             }}>
-               {/* Font Awesome question icon */}
               <i className="fas fa-question" style={{color: 'white', fontSize: '24px'}}></i>
             </div>
           ),
           title: 'Unknown status',
-          message: 'We\'re checking your payment status. Please wait a moment or contact support if it doesn\'t update.',
-          bgColor: '#f9fafb', // gray-50
-          borderColor: '#d1d5db', // gray-200
-          textColor: '#6b7280' // gray-500
+          message: 'We\'re checking your payment status. Please wait a moment.',
+          bgColor: '#f9fafb',
+          borderColor: '#d1d5db',
+          textColor: '#6b7280'
         };
     }
   };
 
-  // This loading state is specifically for the data fetching after the component
-  // has been rendered by Suspense.
   if (loading) {
     return (
       <>
-        {/* Styles for the loading state *within* the component */}
         <style jsx>{`
           @keyframes spin {
             0% { transform: rotate(0deg); }
@@ -283,12 +267,10 @@ const PaymentResultComponent = () => {
     );
   }
 
-  // This error state handles fetching errors or transaction not found after the component loads
   if (error || !transaction) {
     return (
       <>
-         {/* Styles for the error state *within* the component */}
-         <style jsx>{`
+        <style jsx>{`
           .container {
             min-height: 100vh;
             background-color: #f6f9fc;
@@ -312,7 +294,7 @@ const PaymentResultComponent = () => {
           .error-icon {
             width: 64px;
             height: 64px;
-            background: #ef4444; /* red-500 */
+            background: #ef4444;
             border-radius: 50%;
             display: flex;
             align-items: center;
@@ -347,34 +329,33 @@ const PaymentResultComponent = () => {
           }
           
           .button-primary {
-            background: #0073E6; /* Example primary color */
+            background: #0073E6;
             color: white;
           }
           
           .button-primary:hover {
-            background: #0066CC; /* Darker shade on hover */
+            background: #0066CC;
           }
           
           .button-secondary {
-            background: #f8f9fa; /* Light gray */
-            color: #32325d; /* Dark gray text */
-            border: 1px solid #e6ebf1; /* Light border */
+            background: #f8f9fa;
+            color: #32325d;
+            border: 1px solid #e6ebf1;
           }
           
           .button-secondary:hover {
-            background: #f1f3f4; /* Slightly darker gray on hover */
+            background: #f1f3f4;
           }
         `}</style>
         
         <div className="container">
           <div className="card">
             <div className="error-icon">
-               {/* Font Awesome exclamation triangle icon */}
               <i className="fas fa-exclamation-triangle" style={{color: 'white', fontSize: '24px'}}></i>
             </div>
-            <h1 className="title">Error</h1>
+            <h1 className="title">Transaction not found</h1>
             <p className="message">
-              {error || 'An unexpected error occurred.'}
+              {error || 'We couldn\'t find the transaction you\'re looking for.'}
             </p>
             <Link href="/" className="button button-primary" style={{display: 'block', textDecoration: 'none'}}>
               Return to Homepage
@@ -391,20 +372,16 @@ const PaymentResultComponent = () => {
     );
   }
 
-  // If not loading and no error, display the transaction result
   const statusContent = getStatusContent(transaction.status);
 
-   // Calculate VAT and other amounts for display if not directly provided
-   const vatAmount = transaction.metadata?.vat_amount || 0;
-   const vatRate = transaction.metadata?.vat_rate || 0;
-   const shipping = transaction.shippingFee || 0;
-   // If subtotal is not provided, calculate it by subtracting VAT and shipping from total
-   const subtotal = transaction.subtotal ?? (transaction.total - vatAmount - shipping);
-
+  // Calculate VAT and other amounts for display
+  const vatAmount = transaction.metadata?.vat_amount || 0;
+  const vatRate = transaction.metadata?.vat_rate || 0;
+  const subtotal = transaction.subtotal || (transaction.total - vatAmount - (transaction.shippingFee || 0));
+  const shipping = transaction.shippingFee || 0;
 
   return (
     <>
-      {/* Styles for the main transaction result view */}
       <style jsx>{`
         @keyframes spin {
           0% { transform: rotate(0deg); }
@@ -413,7 +390,7 @@ const PaymentResultComponent = () => {
         
         .container {
           min-height: 100vh;
-          background-color: #f6f9fc; /* light gray-blue */
+          background-color: #f6f9fc;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -434,12 +411,12 @@ const PaymentResultComponent = () => {
         .title {
           font-size: 24px;
           font-weight: 600;
-          color: #32325d; /* dark purple-blue */
+          color: #32325d;
           margin-bottom: 12px;
         }
         
         .message {
-          color: #6b7c93; /* medium gray-blue */
+          color: #6b7c93;
           font-size: 16px;
           margin-bottom: 32px;
           line-height: 1.5;
@@ -448,28 +425,28 @@ const PaymentResultComponent = () => {
         .pending-status {
           margin-bottom: 24px;
           padding: 12px;
-          background: #eff6ff; /* blue-50 */
-          border: 1px solid #bfdbfe; /* blue-200 */
+          background: #eff6ff;
+          border: 1px solid #bfdbfe;
           border-radius: 6px;
           display: flex;
           align-items: center;
           justify-content: center;
           gap: 8px;
           font-size: 14px;
-          color: #1d4ed8; /* blue-700 */
+          color: #1d4ed8;
         }
         
         .spinner-small {
           width: 16px;
           height: 16px;
-          border: 2px solid #1d4ed8; /* blue-700 */
+          border: 2px solid #1d4ed8;
           border-top: 2px solid transparent;
           border-radius: 50%;
           animation: spin 1s linear infinite;
         }
         
         .details-card {
-          border: 1px solid #e6ebf1; /* light gray */
+          border: 1px solid #e6ebf1;
           border-radius: 6px;
           padding: 20px;
           margin-bottom: 24px;
@@ -479,7 +456,7 @@ const PaymentResultComponent = () => {
         .details-title {
           font-size: 14px;
           font-weight: 600;
-          color: #32325d; /* dark purple-blue */
+          color: #32325d;
           margin-bottom: 16px;
         }
         
@@ -496,14 +473,14 @@ const PaymentResultComponent = () => {
         }
         
         .detail-label {
-          color: #6b7c93; /* medium gray-blue */
-          display: flex; /* Added for icon alignment */
+          color: #6b7c93;
+          display: flex;
           align-items: center;
-          gap: 8px; /* Space between icon and text */
+          gap: 8px;
         }
         
         .detail-value {
-          color: #32325d; /* dark purple-blue */
+          color: #32325d;
           font-weight: 500;
           font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
         }
@@ -516,38 +493,37 @@ const PaymentResultComponent = () => {
         }
         
         .status-successful {
-          background: #dcfce7; /* green-100 */
-          color: #16a34a; /* green-600 */
+          background: #dcfce7;
+          color: #16a34a;
         }
         
         .status-pending {
-          background: #fef3c7; /* amber-100 */
-          color: #d97706; /* amber-700 */
+          background: #fef3c7;
+          color: #d97706;
         }
         
         .status-failed, .status-canceled {
-          background: #fee2e2; /* red-100 */
-          color: #dc2626; /* red-600 */
+          background: #fee2e2;
+          color: #dc2626;
         }
 
         .total-row {
-          border-top: 1px solid #e6ebf1; /* light gray */
+          border-top: 1px solid #e6ebf1;
           padding-top: 12px;
           margin-top: 12px;
           font-weight: 600;
           font-size: 16px;
-          color: #32325d; /* dark purple-blue */
         }
 
         .vat-row {
-          color: #6b7c93; /* medium gray-blue */
+          color: #6b7c93;
         }
 
         .vat-icon {
           margin-right: 4px;
           font-size: 12px;
         }
-
+        
         .button {
           width: 100%;
           padding: 14px 20px;
@@ -558,38 +534,38 @@ const PaymentResultComponent = () => {
           transition: background-color 0.15s;
           border: none;
           margin-bottom: 12px;
-          text-decoration: none; /* For Link component */
-          display: block; /* For Link component */
-          text-align: center; /* For Link component */
+          text-decoration: none;
+          display: block;
+          text-align: center;
         }
         
         .button-primary {
-          background: #0073E6; /* Example primary color */
+          background: #0073E6;
           color: white;
         }
         
         .button-primary:hover {
-          background: #0066CC; /* Darker shade on hover */
+          background: #0066CC;
         }
         
         .button-secondary {
-          background: #f8f9fa; /* Light gray */
-          color: #32325d; /* Dark gray text */
-          border: 1px solid #e6ebf1; /* Light border */
+          background: #f8f9fa;
+          color: #32325d;
+          border: 1px solid #e6ebf1;
         }
         
         .button-secondary:hover {
-          background: #f1f3f4; /* Slightly darker gray on hover */
+          background: #f1f3f4;
         }
         
         .help-text {
           margin-top: 24px;
           font-size: 14px;
-          color: #6b7c93; /* medium gray-blue */
+          color: #6b7c93;
         }
         
         .help-link {
-          color: #0073E6; /* Example primary color */
+          color: #0073E6;
           text-decoration: none;
         }
         
@@ -628,23 +604,21 @@ const PaymentResultComponent = () => {
             </div>
 
             {/* Subtotal */}
-            {subtotal > 0 && ( // Only show if subtotal is meaningful
-              <div className="detail-row">
-                <span className="detail-label">Subtotal</span>
-                <span className="detail-value">
-                  {new Intl.NumberFormat(undefined, { 
-                    style: 'currency', 
-                    currency: transaction.saleCurrency 
-                  }).format(subtotal)}
-                </span>
-              </div>
-            )}
+            <div className="detail-row">
+              <span className="detail-label">Subtotal</span>
+              <span className="detail-value">
+                {new Intl.NumberFormat(undefined, { 
+                  style: 'currency', 
+                  currency: transaction.saleCurrency 
+                }).format(subtotal)}
+              </span>
+            </div>
 
             {/* VAT */}
             {vatAmount > 0 && (
               <div className="detail-row vat-row">
                 <span className="detail-label">
-                  <i className="fas fa-receipt vat-icon"></i> {/* Assuming Font Awesome is available */}
+                  <i className="fas fa-receipt vat-icon"></i>
                   VAT {vatRate > 0 && `(${(vatRate * 100).toFixed(1)}%)`}
                   {transaction.metadata?.vat_country && (
                     <span style={{ fontSize: '12px', marginLeft: '4px' }}>
@@ -663,11 +637,11 @@ const PaymentResultComponent = () => {
             )}
 
             {/* Shipping */}
-            {shipping > 0 && ( // Only show if shipping is positive
+            {shipping > 0 && (
               <div className="detail-row">
                 <span className="detail-label">
-                   <i className="fas fa-truck"></i> {/* Assuming Font Awesome is available */}
-                   Shipping
+                  <i className="fas fa-truck"></i>
+                  Shipping
                 </span>
                 <span className="detail-value">
                   {new Intl.NumberFormat(undefined, { 
@@ -776,4 +750,362 @@ const PaymentResultComponent = () => {
   );
 };
 
-export default PaymentResultComponent;
+export default PaymentResultPage;
+
+success/page.tsx
+// app/product/success/page.tsx
+'use client';
+
+import { useEffect } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
+
+const SuccessPage = () => {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const transactionId = searchParams.get('transactionId');
+
+  useEffect(() => {
+    // Redirect to the new payment page with the status parameter set to 'successful'
+    router.replace(`/product/payment?transactionId=${transactionId || ''}&status=successful`);
+  }, [router, transactionId]);
+
+  // Return a minimal loading state while redirecting
+  return (
+    <>
+      <style jsx>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        
+        .redirect-container {
+          min-height: 100vh;
+          background-color: #f6f9fc;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 20px;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+        }
+        
+        .redirect-card {
+          background: white;
+          border-radius: 8px;
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+          padding: 40px;
+          text-align: center;
+          max-width: 400px;
+          width: 100%;
+        }
+        
+        .redirect-spinner {
+          width: 32px;
+          height: 32px;
+          border: 3px solid #10b981;
+          border-top: 3px solid transparent;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+          margin: 0 auto 20px;
+        }
+        
+        .redirect-text {
+          color: #32325d;
+          font-size: 16px;
+          font-weight: 500;
+        }
+        
+        .redirect-icon {
+          width: 48px;
+          height: 48px;
+          background: #10b981;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin: 0 auto 20px;
+        }
+      `}</style>
+      
+      <div className="redirect-container">
+        <div className="redirect-card">
+          <div className="redirect-icon">
+            <i className="fas fa-check" style={{color: 'white', fontSize: '20px'}}></i>
+          </div>
+          <div className="redirect-spinner"></div>
+          <div className="redirect-text">Redirecting to payment summary...</div>
+        </div>
+      </div>
+    </>
+  );
+};
+
+export default SuccessPage;
+
+[slug]/page.tsx
+// app/product/[slug]/page.tsx
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
+import { getProductBySlug } from '../../../productlib/api';
+import ProductDisplay from '../../../productcomponents/ProductDisplay';
+import { IProduct } from '../../../productlib/types';
+
+// --- Skeleton Component ---
+// This component renders a placeholder UI that mimics the final ProductDisplay layout.
+// It's displayed while the product data is being fetched.
+function ProductSkeleton() {
+  return (
+    <>
+      <style jsx>{`
+        @keyframes shimmer {
+          0% {
+            background-position: -1000px 0;
+          }
+          100% {
+            background-position: 1000px 0;
+          }
+        }
+        .skeleton-container {
+          max-width: 1200px;
+          margin: 40px auto;
+          padding: 20px;
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 40px;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+        }
+        .skeleton-box {
+          background-color: #e0e0e0;
+          border-radius: 8px;
+          background-image: linear-gradient(to right, #e0e0e0 0%, #f0f0f0 50%, #e0e0e0 100%);
+          background-repeat: no-repeat;
+          background-size: 2000px 100%;
+          animation: shimmer 1.5s linear infinite;
+        }
+        .skeleton-image {
+          width: 100%;
+          height: 450px;
+          border-radius: 12px;
+        }
+        .skeleton-details {
+          display: flex;
+          flex-direction: column;
+        }
+        .skeleton-title {
+          width: 80%;
+          height: 36px;
+          margin-bottom: 16px;
+        }
+        .skeleton-price {
+          width: 40%;
+          height: 28px;
+          margin-bottom: 24px;
+        }
+        .skeleton-description-line {
+          width: 100%;
+          height: 16px;
+          margin-bottom: 12px;
+        }
+        .skeleton-description-line.short {
+          width: 60%;
+        }
+        .skeleton-button {
+          width: 100%;
+          height: 48px;
+          margin-top: auto; /* Pushes the button to the bottom */
+        }
+
+        /* Responsive layout for smaller screens */
+        @media (max-width: 768px) {
+          .skeleton-container {
+            grid-template-columns: 1fr;
+            gap: 20px;
+          }
+          .skeleton-image {
+            height: 300px;
+          }
+        }
+      `}</style>
+
+      <div className="skeleton-container">
+        {/* Left Column: Image Placeholder */}
+        <div className="skeleton-image-wrapper">
+          <div className="skeleton-box skeleton-image"></div>
+        </div>
+        
+        {/* Right Column: Details Placeholder */}
+        <div className="skeleton-details">
+          <div className="skeleton-box skeleton-title"></div>
+          <div className="skeleton-box skeleton-price"></div>
+          
+          <div className="skeleton-description">
+            <div className="skeleton-box skeleton-description-line"></div>
+            <div className="skeleton-box skeleton-description-line"></div>
+            <div className="skeleton-box skeleton-description-line short"></div>
+          </div>
+          
+          <div className="skeleton-box skeleton-button"></div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+
+export default function ProductPage() {
+  const params = useParams();
+  const [product, setProduct] = useState<IProduct | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadProduct() {
+      // Keep loading as true initially
+      setLoading(true);
+      setError(null);
+      setProduct(null);
+
+      try {
+        const slug = params?.slug as string;
+        
+        if (!slug) {
+          setError('Product slug is missing.');
+          setLoading(false); // Stop loading immediately on this type of error
+          return;
+        }
+
+        const fetchedProduct = await getProductBySlug(slug);
+        
+        // This is the artificial delay. We wait 2 seconds AFTER fetching the data.
+        // This ensures the skeleton animation is visible even on very fast connections.
+        setTimeout(() => {
+          if (!fetchedProduct) {
+            setError('Product not found');
+          } else {
+            setProduct(fetchedProduct);
+          }
+          // We set loading to false only after the delay, for both success and 'not found' cases.
+          setLoading(false);
+        }, 2000); // 2000ms = 2 seconds
+
+      } catch (err) {
+        console.error('Error loading product:', err);
+        setError('Failed to load product details.');
+        // If the API call itself fails, stop loading immediately.
+        setLoading(false);
+      }
+      // NOTE: We remove the `finally` block because we now control `setLoading(false)`
+      // inside a setTimeout for the successful fetch path.
+    }
+
+    if (params?.slug) {
+        loadProduct();
+    }
+  }, [params]);
+
+  // --- RENDER LOGIC ---
+
+  // 1. Display the Skeleton Loader while loading is true
+  if (loading) {
+    return <ProductSkeleton />;
+  }
+
+  // 2. Display an error message if something went wrong or the product wasn't found
+  if (error || !product) {
+    return (
+      <>
+        <style jsx>{`
+          .error-container {
+            min-height: 100vh;
+            background-color: #f6f9fc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+          }
+          
+          .error-card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            padding: 40px;
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+          }
+          
+          .error-icon {
+            width: 64px;
+            height: 64px;
+            background: #ef4444;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 24px;
+          }
+          
+          .error-title {
+            font-size: 24px;
+            font-weight: 600;
+            color: #32325d;
+            margin-bottom: 12px;
+          }
+          
+          .error-message {
+            color: #6b7c93;
+            font-size: 16px;
+            margin-bottom: 24px;
+            line-height: 1.5;
+          }
+          
+          .error-button {
+            display: inline-block;
+            width: 100%;
+            padding: 14px 20px;
+            background: #0073E6;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.15s;
+            text-decoration: none;
+            text-align: center;
+          }
+          
+          .error-button:hover {
+            background: #0066CC;
+          }
+        `}</style>
+        
+        <div className="error-container">
+          <div className="error-card">
+            <div className="error-icon">
+              {/* You might need to add Font Awesome for this icon to work, or use an SVG */}
+              <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 0 24 24" width="24" fill="white"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+            </div>
+            
+            <h1 className="error-title">
+              {error || 'Product Not Found'}
+            </h1>
+            <p className="error-message">
+              We couldn't find the product you're looking for. It may have been removed or is temporarily unavailable.
+            </p>
+            
+            <a href="/" className="error-button">
+              Return to Homepage
+            </a>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  // 3. Display the actual product content when data is successfully loaded
+  return <ProductDisplay product={product} />;
+}
+

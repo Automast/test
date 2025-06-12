@@ -264,15 +264,22 @@ const TransactionDetailPage = () => {
     dashboardCurrencyAtTransaction, // Currency in which fee and balances are expressed
   } = txDetail;
 
-  const displayTxId = txIdFromBackend || dbId; // Prefer TX_... if available
+const displayTxId = txIdFromBackend || dbId; // Prefer TX_... if available
   const displayCurrencyForTotal = saleCurrency || originCurrency || 'USD';
   const displayTotalAmount = total !== undefined ? total : originAmount;
   
+  // --- MODIFICATION START ---
+  // Extract VAT from metadata, defaulting to 0 if not present
+  const vatAmount = metadata?.vat || 0;
+  
+  // Calculate the new total including VAT for display purposes
+  const totalWithVat = displayTotalAmount + vatAmount;
+  // --- MODIFICATION END ---
+
   const initialProductPrice = metadata?.initial_product_price;
   const initialProductCurrency = metadata?.initial_product_currency;
 
-  // Determine the currency for displaying financial settlement details (fee, pending, reserve)
-  // This should ideally be the dashboardCurrencyAtTransaction or a fallback
+
   const settlementCurrency = dashboardCurrencyAtTransaction || feeCurrency || 'USD';
 
   return (
@@ -336,8 +343,8 @@ const TransactionDetailPage = () => {
             </span>
           </div>
           
-          <div className="flex flex-col items-end">
-            <div className="text-lg font-bold">{formatCurrency(displayTotalAmount, displayCurrencyForTotal)}</div>
+<div className="flex flex-col items-end">
+            <div className="text-lg font-bold">{formatCurrency(totalWithVat, displayCurrencyForTotal)}</div>
             <div className="text-sm text-gray-500">
               {formatDate(processedAt || createdAt)}
             </div>
@@ -443,9 +450,9 @@ const TransactionDetailPage = () => {
                     Financial Information
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-3">
-                    <div>
+<div>
                       <div className="text-sm text-gray-500 mb-1">Customer Payment</div>
-                      <div className="font-medium text-lg">{formatCurrency(total, saleCurrency)}</div>
+                      <div className="font-medium text-lg">{formatCurrency(totalWithVat, saleCurrency)}</div>
                       <div className="text-xs text-gray-500">Currency: {saleCurrency || 'N/A'}</div>
                     </div>
                     
@@ -495,7 +502,7 @@ const TransactionDetailPage = () => {
                     {/* END OF NEW FINANCIAL DETAILS */}
                   </div>
                   
-                  <div className="mt-4 pt-4 border-t border-gray-200">
+<div className="mt-4 pt-4 border-t border-gray-200">
                     <div className="text-sm font-medium mb-2">Price Breakdown (Customer Paid)</div>
                     <div className="space-y-2">
                       <div className="flex justify-between">
@@ -508,9 +515,18 @@ const TransactionDetailPage = () => {
                           <span>{formatCurrency(shippingFee, saleCurrency)}</span>
                         </div>
                       )}
+                      {/* --- MODIFICATION START: Display VAT if it exists --- */}
+                      {vatAmount > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">VAT</span>
+                          <span>{formatCurrency(vatAmount, saleCurrency)}</span>
+                        </div>
+                      )}
+                      {/* --- MODIFICATION END --- */}
                       <div className="flex justify-between font-medium">
                         <span>Total</span>
-                        <span>{formatCurrency(total, saleCurrency)}</span>
+                        {/* Use the new total that includes VAT */}
+                        <span>{formatCurrency(totalWithVat, saleCurrency)}</span>
                       </div>
                     </div>
                   </div>

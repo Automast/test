@@ -7,7 +7,8 @@ import { useEffect, useState, useCallback } from 'react';
 import { Pagination } from '@/components/widgets';
 import { ITEMS_PER_PAGE } from '@/consts/vars';
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
-import { AddProductModal, ProductViewModal } from '@/components/ui';
+import { ProductViewModal } from '@/components/ui';
+import { AddProductModal } from '@/components/ui/AddProductModal';
 import Toaster from '@/helpers/Toaster';
 import { useRouter } from 'next/navigation';
 

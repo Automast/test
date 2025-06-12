@@ -1,9 +1,13 @@
 // app/product/payment/page.tsx
+
 'use client';
 
 import { Suspense } from 'react';
+
+// Import the main client component that fetches and displays the result
 import PaymentResultComponent from './PaymentResultComponent';
 
+// Define a simple loading fallback component
 const LoadingFallback = () => (
   <>
     <style jsx>{`
@@ -58,14 +62,19 @@ const LoadingFallback = () => (
     <div className="container">
       <div className="card">
         <div className="spinner"></div>
-        <h1 className="title">Loading payment page...</h1>
-        <p className="message">Please wait while we load your payment information.</p>
+        <h1 className="title">Loading payment result...</h1>
+        <p className="message">Please wait while we fetch your transaction details.</p>
       </div>
     </div>
   </>
 );
 
+// The main page component wraps the client component with Suspense
 const PaymentResultPage = () => {
+  // The Suspense boundary handles the initial loading state while the client component
+  // (PaymentResultComponent) is being fetched and rendered.
+  // The loading state *within* PaymentResultComponent handles the data fetching state
+  // *after* the component has loaded.
   return (
     <Suspense fallback={<LoadingFallback />}>
       <PaymentResultComponent />
