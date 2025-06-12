@@ -1,0 +1,4447 @@
+CheckoutSummary.tsx
+// productcomponents/CheckoutSummary.tsx
+'use client';
+
+import { IProduct, IVariantSelection } from '../productlib/types';
+import { formatPrice } from '../productlib/currency';
+
+interface CheckoutSummaryProps {
+  product: IProduct;
+  quantity: number;
+  variantSelections: IVariantSelection[];
+  selectedShipping?: string;
+  localCurrency?: string;
+  subtotal: number;
+  vat: number;
+  shipping: number;
+  total: number;
+  displayCurrency: string;
+  taxRate?: number;
+}
+
+// Define an extended product type that explicitly includes our local currency properties
+interface ProductWithLocalCurrency extends IProduct {
+  localPrice?: number;
+  localCurrency?: string;
+}
+
+const CheckoutSummary: React.FC<CheckoutSummaryProps> = ({
+  product,
+  quantity,
+  variantSelections,
+  selectedShipping,
+  localCurrency,
+  subtotal,
+  vat,
+  shipping,
+  total,
+  displayCurrency,
+  taxRate = 0
+}) => {
+  // Cast product to our extended type to avoid TypeScript errors
+  const productWithLocal = product as ProductWithLocalCurrency;
+  
+  // Use product local price if available, or fall back to original price
+  const displayPrice = productWithLocal.localPrice !== undefined ? productWithLocal.localPrice : product.price;
+
+  const formatImageUrl = (url: string): string => {
+    // If it's already a full URL, use it as-is
+    if (url.startsWith('http')) {
+      return url;
+    }
+    
+    // Make sure URLs that start with /uploads have the proper /api prefix
+    if (url.startsWith('/uploads') && !url.startsWith('/api/uploads')) {
+      return `/api${url}`;
+    }
+    
+    // URLs that already have /api/uploads are good
+    if (url.startsWith('/api/uploads')) {
+      return url;
+    }
+    
+    // For all other cases, ensure it has the complete path
+    return `/api/uploads/${url.replace(/^\//, '')}`;
+  };
+
+  // Get recurring text for digital products
+  const getRecurringText = (): string => {
+    if (product.type === 'digital' && product.digital?.recurring) {
+      const { interval } = product.digital.recurring;
+      if (interval === 'monthly') return '/mo';
+      if (interval === 'yearly') return '/yr';
+    }
+    return '';
+  };
+
+  // Get trial text for digital products
+  const getTrialText = (): string => {
+    if (product.type === 'digital' && product.digital?.recurring?.hasTrial) {
+      const trialDays = product.digital.recurring.trialDays || 0;
+      if (trialDays > 0) {
+        return `${trialDays}-day trial`;
+      }
+      return 'Free trial';
+    }
+    return '';
+  };
+
+  const recurringText = getRecurringText();
+  const trialText = getTrialText();
+  
+  return (
+    <>
+      <style jsx>{`
+        .product-details {
+          background: #f8f9fa;
+          border: 1px solid #e6ebf1;
+          border-radius: 6px;
+          padding: 20px;
+          margin-top: 20px;
+        }
+        
+        .detail-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 12px;
+          font-size: 14px;
+        }
+        
+        .detail-label {
+          color: #8898aa;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        
+        .detail-value {
+          color: #32325d;
+          font-weight: 500;
+        }
+        
+        .total-row {
+          border-top: 1px solid #e6ebf1;
+          padding-top: 12px;
+          margin-top: 12px;
+          font-weight: 600;
+          font-size: 16px;
+        }
+        
+        .product-info {
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
+          margin-bottom: 20px;
+          padding-bottom: 16px;
+          border-bottom: 1px solid #e6ebf1;
+        }
+        
+        .product-image {
+          width: 48px;
+          height: 48px;
+          background: #f6f9fc;
+          border-radius: 6px;
+          overflow: hidden;
+          flex-shrink: 0;
+          border: 1px solid #e6ebf1;
+        }
+        
+        .product-image img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+
+        .product-image-placeholder {
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #8898aa;
+          font-size: 12px;
+        }
+        
+        .product-text {
+          flex: 1;
+          min-width: 0;
+        }
+        
+        .product-title {
+          font-size: 14px;
+          font-weight: 500;
+          color: #32325d;
+          margin-bottom: 4px;
+          word-wrap: break-word;
+        }
+        
+        .product-variants {
+          font-size: 12px;
+          color: #8898aa;
+          margin-bottom: 4px;
+        }
+        
+        .product-quantity {
+          font-size: 12px;
+          color: #8898aa;
+        }
+
+        .product-meta {
+          font-size: 12px;
+          color: #8898aa;
+          margin-bottom: 4px;
+          display: flex;
+          align-items: center;
+        }
+
+        .product-subscription {
+          font-size: 12px;
+          color: #2563eb;
+          margin-bottom: 4px;
+          font-weight: 500;
+          display: flex;
+          align-items: center;
+        }
+
+        .product-trial {
+          font-size: 11px;
+          color: #16a34a;
+          background: #f0fdf4;
+          padding: 2px 6px;
+          border-radius: 3px;
+          display: inline-flex;
+          align-items: center;
+          margin-bottom: 4px;
+        }
+        
+        .product-price {
+          font-size: 14px;
+          font-weight: 500;
+          color: #32325d;
+          flex-shrink: 0;
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 2px;
+        }
+
+        .price-main {
+          display: flex;
+          align-items: baseline;
+          gap: 2px;
+        }
+
+        .price-recurring {
+          font-size: 11px;
+          color: #6b7280;
+        }
+        
+        .original-price {
+          font-size: 12px;
+          color: #8898aa;
+          margin-top: 12px;
+          text-align: right;
+        }
+        
+        .free-badge {
+          color: #00d924;
+          font-weight: 500;
+        }
+
+        .vat-row {
+          color: #6b7c93;
+        }
+
+        .vat-icon {
+          margin-right: 4px;
+          font-size: 12px;
+        }
+
+        .shipping-row {
+          color: #6b7c93;
+        }
+
+        .shipping-icon {
+          margin-right: 4px;
+          font-size: 12px;
+        }
+
+        .icon-prefix {
+          margin-right: 6px;
+          width: 14px;
+          text-align: center;
+        }
+      `}</style>
+      
+      <div className="product-details">
+        {/* Product Info */}
+        <div className="product-info">
+          {/* Product Image */}
+          <div className="product-image">
+            {product.images && product.images.length > 0 ? (
+              <img
+                src={formatImageUrl(product.images.find(img => img.isMain)?.url || product.images[0].url)}
+                alt={product.title}
+              />
+            ) : (
+              <div className="product-image-placeholder">
+                <i className="fas fa-image"></i>
+              </div>
+            )}
+          </div>
+          
+          {/* Product Details */}
+          <div className="product-text">
+            <div className="product-title">{product.title}</div>
+            
+            {/* Product Type */}
+            <div className="product-meta">
+              {product.type === 'digital' ? (
+                <><i className="fas fa-mobile-alt icon-prefix"></i>Digital Product</>
+              ) : (
+                <><i className="fas fa-box icon-prefix"></i>Physical Product</>
+              )}
+            </div>
+
+            {/* SKU and Barcode - Only show if they exist */}
+            {product.sku && (
+              <div className="product-meta">SKU: {product.sku}</div>
+            )}
+            {product.barcode && (
+              <div className="product-meta">Barcode: {product.barcode}</div>
+            )}
+
+            {/* Subscription Info */}
+            {recurringText && (
+              <div className="product-subscription">
+                <i className="fas fa-sync-alt icon-prefix"></i> Subscription{recurringText}
+              </div>
+            )}
+
+            {/* Trial Info */}
+            {trialText && (
+              <div className="product-trial">
+                <i className="fas fa-gift icon-prefix"></i> {trialText}
+              </div>
+            )}
+            
+            {/* Selected variants - Only show if variants are selected */}
+            {variantSelections.length > 0 && variantSelections.every(v => v.value) && (
+              <div className="product-variants">
+                {variantSelections.map((selection, index) => (
+                  <div key={index}>
+                    {selection.name}: {selection.value}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Shipping Method for Physical Products - Only show if selected */}
+            {product.type === 'physical' && selectedShipping && (
+              <div className="product-meta">
+                <i className="fas fa-truck icon-prefix"></i> Shipping: {selectedShipping}
+              </div>
+            )}
+            
+            {/* Quantity - Only show if quantity enabled OR quantity > 1 */}
+            {(product.quantityEnabled !== false || quantity > 1) && (
+              <div className="product-quantity">Qty: {quantity}</div>
+            )}
+          </div>
+          
+          {/* Price */}
+          <div className="product-price">
+            <div className="price-main">
+              {formatPrice(displayPrice * quantity, displayCurrency)}
+              {recurringText && quantity === 1 && (
+                <span className="price-recurring">{recurringText}</span>
+              )}
+            </div>
+          </div>
+        </div>
+        
+        {/* Price Breakdown */}
+        <div className="detail-row">
+          <span className="detail-label">Subtotal</span>
+          <span className="detail-value">{formatPrice(subtotal, displayCurrency)}</span>
+        </div>
+        
+        {/* VAT - Only show if there is VAT */}
+        {vat > 0 && (
+          <div className="detail-row vat-row">
+            <span className="detail-label">
+              <i className="fas fa-receipt vat-icon"></i>
+              VAT{taxRate > 0 && ` (${(taxRate * 100).toFixed(1)}%)`}
+            </span>
+            <span className="detail-value">{formatPrice(vat, displayCurrency)}</span>
+          </div>
+        )}
+        
+        {/* Shipping - Show if there is shipping cost */}
+        {shipping > 0 && (
+          <div className="detail-row shipping-row">
+            <span className="detail-label">
+              <i className="fas fa-truck shipping-icon"></i>
+              Shipping
+            </span>
+            <span className="detail-value">{formatPrice(shipping, displayCurrency)}</span>
+          </div>
+        )}
+        
+        {/* Free Shipping - Show if shipping is selected but free */}
+        {shipping === 0 && selectedShipping && (
+          <div className="detail-row shipping-row">
+            <span className="detail-label">
+              <i className="fas fa-truck shipping-icon"></i>
+              Shipping
+            </span>
+            <span className="detail-value free-badge">Free</span>
+          </div>
+        )}
+        
+        {/* Total */}
+        <div className="detail-row total-row">
+          <span className="detail-label">Total</span>
+          <span className="detail-value">
+            {formatPrice(total, displayCurrency)}
+          </span>
+        </div>
+        
+        {/* Show original price if converted - Only if currencies are different */}
+        {displayCurrency !== product.defaultCurrency && (
+          <div className="original-price">
+            Original: {formatPrice(product.price * quantity, product.defaultCurrency)}
+          </div>
+        )}
+      </div>
+    </>
+  );
+};
+
+export default CheckoutSummary;
+
+PaymentForm.tsx
+// productcomponents/PaymentForm.tsx
+'use client';
+import { useState, useEffect, FormEvent } from 'react';
+import { loadStripe, Stripe, StripeElements, StripeCardNumberElement } from '@stripe/stripe-js';
+import {
+  Elements,
+  useStripe,
+  useElements,
+  CardNumberElement,
+  CardExpiryElement,
+  CardCvcElement,
+} from '@stripe/react-stripe-js';
+import { ICountry, IState } from 'country-state-city';
+import { Country, State } from 'country-state-city';
+
+import { IBillingInfo } from '../productlib/types';
+import { isPixSupported, getUserCountry } from '../productlib/currency';
+import { validateBillingInfo } from '../productlib/utils';
+import logger from '../productlib/logger';
+
+interface PaymentFormProps {
+  currency: string;
+  amount: number; // Expected in smallest currency unit (e.g., cents)
+  transactionId: string;
+  onSubmit: (
+    billingInfo: IBillingInfo,
+    paymentMethod: 'card' | 'pix' | 'paypal' | 'wallet' | 'other',
+    status: 'pending' | 'successful' | 'canceled',
+    paymentIntentId?: string
+  ) => void;
+  isSubmitting: boolean;
+  // Add product details needed for create-intent
+  productOwnerId: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+  // Add country and state change handlers for VAT calculation
+  onCountryChange?: (countryCode: string) => void;
+  onStateChange?: (stateCode: string) => void;
+}
+
+// Interface for CheckoutForm props
+interface CheckoutFormPropsInternal {
+  currency: string;
+  amount: number;
+  transactionId: string;
+  onSubmit: PaymentFormProps['onSubmit'];
+  isSubmitting: boolean;
+  billingInfo: IBillingInfo;
+  setBillingInfo: (info: IBillingInfo | ((prev: IBillingInfo) => IBillingInfo)) => void;
+  errors: Record<string, string>;
+  setErrors: (errors: Record<string, string> | ((prev: Record<string, string>) => Record<string, string>)) => void;
+  productOwnerId: string;
+  productId: string;
+  productName: string;
+  quantityParam: number;
+  onCountryChange?: (countryCode: string) => void;
+  onStateChange?: (stateCode: string) => void;
+}
+
+let stripePromiseSingleton: Promise<Stripe | null> | null = null;
+
+const getStripeInstance = (): Promise<Stripe | null> => {
+  if (!stripePromiseSingleton) {
+    stripePromiseSingleton = (async () => {
+      try {
+        const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ||
+                        (process.env.NODE_ENV === 'development' ? 'http://localhost:5000' : window.location.origin);
+        
+        const apiUrl = `${baseUrl.replace(/\/api$/, '')}/api/payments/config`;
+        logger.info('[PaymentForm] Fetching payment config from:', apiUrl);
+        const response = await fetch(apiUrl);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            logger.error('[PaymentForm] Failed to fetch payment config. Status:', response.status, 'Response:', errorText);
+            return null;
+        }
+        const config = await response.json();
+        logger.info('[PaymentForm] Payment config response:', config);
+        
+        if (config.success && config.data?.processors?.stripe?.configured && config.data.processors.stripe.publicKey) {
+          logger.info('[PaymentForm] Stripe loaded successfully with key prefix:', config.data.processors.stripe.publicKey.substring(0, 20) + '...');
+          return loadStripe(config.data.processors.stripe.publicKey);
+        } else {
+          logger.error('[PaymentForm] Stripe not configured or public key missing in fetched config:', config.data?.processors?.stripe);
+          return null;
+        }
+      } catch (error) {
+        logger.error('[PaymentForm] Error loading Stripe config or initializing Stripe.js:', error);
+        return null;
+      }
+    })();
+  }
+  return stripePromiseSingleton;
+};
+
+const CARD_ELEMENT_OPTIONS = {
+  style: {
+    base: {
+      color: '#32325d',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif',
+      fontSmoothing: 'antialiased',
+      fontSize: '16px',
+      lineHeight: '24px',
+      '::placeholder': {
+        color: '#aab7c4',
+      },
+    },
+    invalid: {
+      color: '#fa755a',
+      iconColor: '#fa755a',
+    },
+  },
+  showIcon: true,
+};
+
+const CheckoutForm: React.FC<CheckoutFormPropsInternal> = ({
+  currency,
+  amount,
+  transactionId,
+  onSubmit,
+  isSubmitting,
+  billingInfo,
+  setBillingInfo,
+  errors,
+  setErrors,
+  productOwnerId,
+  productId,
+  productName,
+  quantityParam,
+  onCountryChange,
+  onStateChange,
+}) => {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [paymentError, setPaymentError] = useState<string>('');
+  const [processing, setProcessing] = useState(false);
+  const [countries, setCountries] = useState<ICountry[]>([]);
+  const [states, setStates] = useState<IState[]>([]);
+  const [selectedCountry, setSelectedCountry] = useState<string>(billingInfo.country || '');
+  const [clientSecret, setClientSecret] = useState<string>('');
+  const [paymentIntentCreated, setPaymentIntentCreated] = useState(false);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'card' | 'pix'>('card');
+  const [addressLine2, setAddressLine2] = useState<string>('');
+  const [saveInfo, setSaveInfo] = useState(true);
+
+  const pixSupported = isPixSupported(currency);
+
+  useEffect(() => {
+    setCountries(Country.getAllCountries());
+  }, []);
+
+  // Fixed useEffect hooks to prevent loops
+  useEffect(() => {
+    if (selectedCountry) {
+      setStates(State.getStatesOfCountry(selectedCountry));
+    } else {
+      setStates([]);
+    }
+  }, [selectedCountry]);
+
+  useEffect(() => {
+    if (billingInfo.country && billingInfo.country !== selectedCountry) {
+      setSelectedCountry(billingInfo.country);
+    }
+  }, [billingInfo.country, selectedCountry]);
+
+  // Single effect for notifying parent about location changes
+  useEffect(() => {
+    // Only notify if we have a complete location change and avoid rapid calls
+    const timeoutId = setTimeout(() => {
+      if (onCountryChange && selectedCountry) {
+        onCountryChange(selectedCountry);
+      }
+      if (onStateChange && billingInfo.state) {
+        onStateChange(billingInfo.state);
+      }
+    }, 100); // Small delay to prevent rapid calls
+
+    return () => clearTimeout(timeoutId);
+  }, [selectedCountry, billingInfo.state]); // Remove callback functions from dependencies
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setBillingInfo(prev => ({ ...prev, [name]: value }));
+    if (errors[name]) {
+      setErrors(prev => { const newErrors = { ...prev }; delete newErrors[name]; return newErrors; });
+    }
+  };
+
+  const handleCountryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newCountry = e.target.value;
+    setSelectedCountry(newCountry);
+    setBillingInfo(prev => ({ ...prev, country: newCountry, state: '' }));
+  };
+
+  const handleStateChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newState = e.target.value;
+    setBillingInfo(prev => ({ ...prev, state: newState }));
+  };
+  
+  const handlePaymentMethodChange = (method: 'card' | 'pix') => {
+    setSelectedPaymentMethod(method);
+    setPaymentError(''); // Clear errors when switching
+  }
+
+  const createPaymentIntent = async (): Promise<string | null> => {
+    if (paymentIntentCreated || clientSecret) {
+      return clientSecret;
+    }
+
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ||
+                      (process.env.NODE_ENV === 'development' ? 'http://localhost:5000' : window.location.origin);
+      
+      const apiUrl = `${baseUrl.replace(/\/api$/, '')}/api/payments/create-intent`;
+      
+      logger.info('[PaymentForm] Creating payment intent for transaction:', transactionId);
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount, // This is already smallest unit (e.g. cents)
+          currency: currency.toLowerCase(), // This is the currency code like 'brl'
+          transactionId, // The TX_... ID
+          description: `Purchase: ${productName} (x${quantityParam}) - TX: ${transactionId}`,
+          // Pass new data
+          productOwnerId: productOwnerId,
+          productId: productId,
+          productName: productName,
+          quantity: quantityParam,
+          customerEmail: billingInfo.email,
+          // Add billing info to be stored in Stripe metadata
+          billingInfo: {
+            name: billingInfo.name || '',
+            email: billingInfo.email || '',
+            phone: billingInfo.phone || '',
+            address: billingInfo.address || '',
+            city: billingInfo.city || '',
+            state: billingInfo.state || '',
+            postalCode: billingInfo.postalCode || '',  
+            country: billingInfo.country || ''
+          }
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({message: "Failed to parse error from create-intent"}));
+        logger.error('[PaymentForm] Failed to create payment intent. Status:', response.status, 'Error:', errorData);
+        throw new Error(errorData.message || `Failed to initialize payment (HTTP ${response.status})`);
+      }
+
+      const data = await response.json();
+      if (data.success && data.data.clientSecret) {
+        logger.info('[PaymentForm] Payment intent created successfully. Client Secret (first 20):', data.data.clientSecret.substring(0,20)+'...');
+        setClientSecret(data.data.clientSecret);
+        setPaymentIntentCreated(true);
+        return data.data.clientSecret;
+      } else {
+        logger.error('[PaymentForm] Failed to get clientSecret from create-intent:', data.message || 'Unknown error', data.errors);
+        throw new Error(data.message || 'Failed to initialize payment details.');
+      }
+    } catch (error) {
+      logger.error('[PaymentForm] Error creating payment intent:', error);
+      throw error;
+    }
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setPaymentError('');
+    
+    // Merge address line 1 and 2
+    const mergedAddress = addressLine2 
+      ? `${billingInfo.address}, ${addressLine2}`
+      : billingInfo.address;
+    
+    const finalBillingInfo = {
+      ...billingInfo,
+      address: mergedAddress
+    };
+    
+    if (selectedPaymentMethod === 'pix') {
+      // Handle PIX payment
+      const validation = validateBillingInfo(finalBillingInfo);
+      if (!validation.valid) {
+        setErrors(validation.errors);
+        return;
+      }
+      
+      onSubmit(finalBillingInfo, 'pix', 'pending');
+      return;
+    }
+
+    if (!stripe || !elements) {
+      setPaymentError('Stripe has not loaded yet. Please try again.');
+      logger.warn('[CheckoutForm] handleSubmit: Stripe or Elements not ready.');
+      return;
+    }
+
+    const cardNumberElement = elements.getElement(CardNumberElement);
+    if (!cardNumberElement) {
+      setPaymentError('Card number element not ready.');
+      logger.warn('[CheckoutForm] handleSubmit: CardNumberElement not found.');
+      return;
+    }
+    
+    if (processing || isSubmitting) return;
+    setProcessing(true);
+
+    try {
+      const validation = validateBillingInfo(finalBillingInfo);
+      if (!validation.valid) {
+        setErrors(validation.errors);
+        setProcessing(false);
+        logger.info('[CheckoutForm] Billing info validation failed:', validation.errors);
+        return;
+      }
+
+      let currentClientSecret = clientSecret;
+      if (!currentClientSecret) {
+        currentClientSecret = await createPaymentIntent();
+        if (!currentClientSecret) {
+          setPaymentError('Failed to initialize payment. Please try again.');
+          setProcessing(false);
+          return;
+        }
+      }
+      
+      logger.info('[CheckoutForm] Attempting to create PaymentMethod...');
+      const { error: createPmError, paymentMethod } = await stripe.createPaymentMethod({
+        type: 'card',
+        card: cardNumberElement,
+        billing_details: {
+          name: finalBillingInfo.name,
+          email: finalBillingInfo.email,
+          phone: finalBillingInfo.phone,
+          address: {
+            line1: finalBillingInfo.address,
+            city: finalBillingInfo.city,
+            state: finalBillingInfo.state,
+            postal_code: finalBillingInfo.postalCode,
+            country: finalBillingInfo.country,
+          },
+        },
+      });
+
+      if (createPmError) {
+        logger.error('[CheckoutForm] createPaymentMethod failed:', createPmError);
+        setPaymentError(createPmError.message || 'Failed to process payment details.');
+        onSubmit(finalBillingInfo, 'card', 'canceled');
+        setProcessing(false);
+        return;
+      }
+      logger.info('[CheckoutForm] PaymentMethod created:', paymentMethod.id);
+
+      logger.info('[CheckoutForm] Confirming card payment with clientSecret (first 20 chars):', currentClientSecret.substring(0,20)+'...');
+      const { error: confirmError, paymentIntent } = await stripe.confirmCardPayment(currentClientSecret, {
+        payment_method: paymentMethod.id,
+      });
+
+      if (confirmError) {
+        logger.error('[CheckoutForm] Payment confirmation failed:', confirmError);
+        setPaymentError(confirmError.message || 'Payment failed. Please try again.');
+        onSubmit(finalBillingInfo, 'card', 'canceled', paymentIntent ? paymentIntent.id : undefined);
+      } else if (paymentIntent) {
+        logger.info('[CheckoutForm] Payment intent after confirmation:', paymentIntent.id, 'Status:', paymentIntent.status);
+        let status: 'pending' | 'successful' | 'canceled' = 'pending';
+        if (paymentIntent.status === 'succeeded') status = 'successful';
+        else if (paymentIntent.status === 'canceled') status = 'canceled';
+        else if (['requires_action', 'requires_confirmation', 'processing'].includes(paymentIntent.status)) status = 'pending';
+        
+        onSubmit(finalBillingInfo, 'card', status, paymentIntent.id);
+      }
+    } catch (err: any) {
+      logger.error('[CheckoutForm] Unexpected error during payment submission:', err);
+      setPaymentError('An unexpected error occurred. Please try again.');
+      
+      const mergedAddress = addressLine2 
+        ? `${billingInfo.address}, ${addressLine2}`
+        : billingInfo.address;
+      
+      const finalBillingInfo = {
+        ...billingInfo,
+        address: mergedAddress
+      };
+      
+      onSubmit(finalBillingInfo, 'card', 'canceled');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const getDisplayAmount = () => {
+    return new Intl.NumberFormat(undefined, { 
+      style: 'currency', 
+      currency: currency.toUpperCase() 
+    }).format(amount / 100);
+  };
+
+  const getFlagIcon = (countryCode: string) => {
+    return `https://flagcdn.com/w20/${countryCode.toLowerCase()}.png`;
+  };
+
+  return (
+    <>
+      <style jsx>{`
+        * {
+          box-sizing: border-box;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", "Ubuntu", sans-serif;
+        }
+        
+        body {
+          margin: 0;
+          padding: 0;
+          font-size: 16px;
+          line-height: 1.3;
+          color: hsla(0,0%,10%,0.9);
+          -webkit-font-smoothing: antialiased;
+          touch-action: manipulation;
+        }
+        
+        fieldset {
+          border: none;
+          padding: 0;
+          margin: 0;
+        }
+
+        .error-message {
+          color: #dc2727;
+          font-size: 13px;
+          margin-top: 6px;
+          width: 100%; /* Ensure it takes full width in flex container */
+        }
+
+        .payment-error-display {
+          color: #fff;
+          background-color: #dc2727;
+          border-radius: 6px;
+          padding: 12px;
+          margin: 16px 0;
+          font-size: 14px;
+          text-align: center;
+        }
+        
+        /* Forms */
+        .form-section {
+          margin-bottom: 8px;
+        }
+        
+        .form-heading {
+          margin-top: 24px;
+          margin-bottom: 16px;
+          color: hsla(0,0%,10%,0.9);
+          font-size: 16px;
+          font-weight: 500;
+        }
+        
+        .field-group {
+          margin: 4px 0 0 0;
+        }
+        
+        .field-label-container {
+          overflow-wrap: anywhere;
+          position: relative;
+          display: flex;
+          justify-content: space-between;
+        }
+        
+        .field-label {
+          color: hsla(0,0%,10%,0.7);
+          font-size: 13px;
+          font-weight: 500;
+          margin-bottom: 6px;
+          display: block;
+        }
+        
+        .field-container {
+          display: flex;
+          flex-wrap: wrap;
+          position: relative;
+        }
+        
+        .field-child {
+          box-sizing: border-box;
+          flex: 0 1 auto;
+          max-width: 100%;
+          min-width: 0;
+          transform-origin: 0%;
+        }
+        
+        .field-child--width-12 {
+          width: 100%;
+        }
+        
+        .field-child--width-6 {
+          width: 50%;
+        }
+        
+        .input-wrapper {
+          display: block;
+          margin: 0;
+          padding: 0;
+          position: relative;
+        }
+        
+        .input-container {
+          position: relative;
+          height: 44px; /* Ensure consistent height */
+        }
+        
+        .input, .select {
+          appearance: none;
+          background: white;
+          border: 0;
+          box-shadow: 0 0 0 1px #e0e0e0, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+          color: hsla(0,0%,10%,0.9);
+          font-size: 16px;
+          height: 44px;
+          line-height: 1.5;
+          padding: 8px 12px;
+          position: relative;
+          transition: box-shadow 0.08s ease-in, color 0.08s ease-in;
+          width: 100%;
+          border-radius: 6px;
+        }
+
+        /* Stripe Elements Styling - Key Addition */
+        .stripe-element-wrapper {
+            background: white;
+            box-shadow: 0 0 0 1px #e0e0e0, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+            color: hsla(0,0%,10%,0.9);
+            height: 44px;
+            padding: 10px 12px;
+            transition: box-shadow 0.08s ease-in, color 0.08s ease-in;
+            width: 100%;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .stripe-element-wrapper:focus-within {
+            box-shadow: 0 0 0 1px rgba(50,151,211,0.7), 0 1px 1px 0 rgba(0,0,0,0.07), 0 0 0 4px rgba(50,151,211,0.3);
+            outline: none;
+            z-index: 2;
+        }
+        
+        .StripeElement {
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+        }
+
+
+.card-group {
+  border-radius: 6px;
+  overflow: hidden;
+  background: white;
+  box-shadow: 0 0 0 1px #e0e0e0, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+}
+
+.card-number-input {
+  position: relative;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e0e0e0;
+  height: 44px;
+  display: block; /* Changed from flex */
+}
+
+.card-row {
+  display: flex;
+  height: 44px;
+}
+
+.card-expiry {
+  flex: 1;
+  position: relative;
+  padding: 10px 12px;
+  border-right: 1px solid #e0e0e0;
+  display: block; /* Changed from flex */
+}
+
+.card-cvc {
+  flex: 1;
+  position: relative;
+  padding: 10px 12px;
+  display: block; /* Changed from flex */
+}
+
+        .input::placeholder, .select::placeholder {
+          color: hsla(0,0%,10%,0.5);
+        }
+        
+        .input:focus, .select:focus {
+          box-shadow: 0 0 0 1px rgba(50,151,211,0.7), 0 1px 1px 0 rgba(0,0,0,0.07), 0 0 0 4px rgba(50,151,211,0.3);
+          outline: none;
+          z-index: 2;
+        }
+        
+        .input-with-icon {
+          text-indent: 24px;
+        }
+        
+        .input-icon {
+          left: 12px;
+          pointer-events: none;
+          position: absolute;
+          top: 50%;
+          transform: translateY(-50%);
+          z-index: 3;
+        }
+        
+        .input-icon svg {
+          fill: hsla(0,0%,10%,0.5);
+        }
+        
+        /* Form Groups - Remove square borders for grouped fields */
+        .field-container .field-child .input,
+        .field-container .field-child .select,
+        .field-container .field-child .stripe-element-wrapper {
+            border-radius: 0;
+            height: 44px;
+        }
+        
+        .field-top.field-left .input,
+        .field-top.field-left .select,
+        .field-top.field-left .stripe-element-wrapper {
+          border-top-left-radius: 6px;
+        }
+        
+        .field-top.field-right .input,
+        .field-top.field-right .select,
+        .field-top.field-right .stripe-element-wrapper {
+          border-top-right-radius: 6px;
+        }
+        
+        .field-bottom.field-left .input,
+        .field-bottom.field-left .select,
+        .field-bottom.field-left .stripe-element-wrapper {
+          border-bottom-left-radius: 6px;
+        }
+        
+        .field-bottom.field-right .input,
+        .field-bottom.field-right .select,
+        .field-bottom.field-right .stripe-element-wrapper {
+          border-bottom-right-radius: 6px;
+        }
+        
+        /* Phone Input */
+        .phone-wrapper {
+          position: relative;
+        }
+        
+        .phone-input {
+          padding-right: 26px;
+        }
+
+        .flag-icon-wrapper {
+            cursor: pointer;
+            height: 16px;
+            width: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .flag-icon {
+          height: 16px;
+          width: auto;
+          max-width: 22px;
+          border-radius: 2px;
+        }
+        
+        /* Select */
+        .select-wrapper {
+          display: flex;
+          position: relative;
+          height: 100%;
+        }
+        
+        .select {
+          padding-right: 48px;
+        }
+        
+        .select-arrow {
+          height: 12px;
+          margin-top: -6px;
+          pointer-events: none;
+          position: absolute;
+          right: 12px;
+          top: 50%;
+          width: 12px;
+          z-index: 3;
+        }
+        
+        /* Payment Methods Accordion */
+        .accordion {
+          background-color: white;
+          border-radius: 6px;
+          box-shadow: 0 0 0 1px #e0e0e0, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+          margin: 4px 0 0 0;
+        }
+        
+        .accordion-item {
+          border-top: 1px solid #e0e0e0;
+          transition: height 0.3s cubic-bezier(0.19,1,0.22,1);
+        }
+        
+        .accordion-item:first-child {
+          border-top: none;
+        }
+        
+        .accordion-header {
+          position: relative;
+          padding: 12px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 16px;
+        }
+
+        .payment-title-inner {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .radio-btn {
+            appearance: none;
+            background-clip: content-box;
+            background-color: white;
+            border-radius: 50%;
+            box-shadow: inset 0 0 0 1px hsla(0,0%,10%,0.4);
+            display: inline-block;
+            height: 16px;
+            width: 16px;
+            min-width: 16px;
+            transition: 0.2s ease;
+            cursor: pointer;
+        }
+
+        .radio-btn:checked {
+            box-shadow: inset 0 0 0 5px black;
+        }
+
+        .payment-icon {
+          height: 16px;
+          text-align: center;
+          width: 24px;
+        }
+        
+        .payment-icon img {
+            border-radius: 2px;
+            height: 16px;
+            max-width: 24px;
+            width: auto;
+        }
+
+        .pix-icon {
+            background: #32BCAD;
+            color: #fff;
+            font-weight: bold;
+            font-size: 10px;
+            line-height: 16px;
+            border-radius: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+        }
+
+        .payment-title-text {
+            color: hsla(0,0%,10%,0.9);
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .brand-icons-container {
+            margin-left: auto;
+            display: flex;
+            gap: 4px;
+        }
+
+        .brand-icon {
+            height: 16px;
+            width: auto;
+        }
+
+        .accordion-content {
+          padding: 0 12px 12px;
+          width: 100%;
+        }
+
+        /* Checkbox */
+        .signup-form {
+            margin-top: 24px;
+        }
+        .signup-header {
+            background-color: white;
+            border-radius: 6px;
+            box-shadow: 0 0 0 1px #e0e0e0, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+            display: flex;
+            flex-direction: row;
+            padding: 12px;
+        }
+        .checkbox-field {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            cursor: pointer;
+            width: 100%;
+        }
+        .checkbox-input {
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            margin-top: 2px;
+            min-width: 16px;
+            position: absolute;
+            opacity: 0;
+            cursor: pointer;
+        }
+        .checkbox-styled {
+          width: 16px;
+          height: 16px;
+          margin-top: 2px;
+          min-width: 16px;
+          background-color: white;
+          border-radius: 4px;
+          box-shadow: 0 0 0 1px #e0e0e0, 0 1px 1px 0 rgba(0,0,0,0.05);
+          position: relative;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.2s ease;
+        }
+        .checkbox-input:checked + .checkbox-styled {
+          background-color: #32325d;
+          box-shadow: 0 0 0 1px #32325d;
+        }
+        .checkbox-tick {
+          display: none;
+          color: white;
+          width: 10px;
+          height: 10px;
+        }
+        .checkbox-input:checked + .checkbox-styled .checkbox-tick {
+          display: block;
+        }
+        .checkbox-label {
+            color: hsla(0,0%,10%,0.9);
+            font-size: 14px;
+            font-weight: 400;
+            user-select: none;
+        }
+        .signup-label-header {
+            font-weight: 500;
+        }
+        .signup-sub-label {
+            color: hsla(0,0%,10%,0.7);
+            font-size: 13px;
+            margin-top: 4px;
+        }
+
+        /* Submit Button */
+        .submit-btn {
+            background-color: #0074d4;
+            border: 0;
+            border-radius: 6px;
+            box-shadow: inset 0 0 0 1px rgba(50,50,93,0.1), 0 2px 5px 0 rgba(50,50,93,0.1), 0 1px 1px 0 rgba(0,0,0,0.07);
+            color: white;
+            cursor: pointer;
+            height: 44px;
+            margin-top: 24px;
+            outline: none;
+            padding: 0;
+            position: relative;
+            transition: all 0.2s ease, box-shadow 0.08s ease-in;
+            width: 100%;
+            font-size: 16px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .submit-btn:disabled {
+            cursor: default;
+            background-color: #aab7c4;
+        }
+        .submit-btn:hover:not(:disabled) {
+            background-color: rgb(0,94,187);
+        }
+        .spinner {
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-left-color: #ffffff;
+            border-radius: 50%;
+            width: 18px;
+            height: 18px;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            color: hsla(0,0%,10%,0.7);
+            font-size: 13px;
+            margin-top: 16px;
+        }
+        .footer-links {
+          display: flex;
+          justify-content: center;
+          gap: 16px;
+          margin-top: 8px;
+        }
+        .footer-link {
+            cursor: pointer;
+            text-decoration: none;
+            color: hsla(0,0%,10%,0.7);
+        }
+        .footer-link:hover {
+            text-decoration: underline dotted hsla(0,0%,10%,0.7);
+        }
+
+        .flex { display: flex; }
+        .flex-col { flex-direction: column; }
+        .flex-wrap { flex-wrap: wrap; }
+        .width-12 { width: 100%; }
+        .gap-16 { gap: 16px; }
+      `}</style>
+
+      <main>
+        <form onSubmit={handleSubmit} noValidate>
+          <div className="flex flex-col gap-16">
+            
+            {/* Contact Information */}
+            <div>
+              <h2 className="form-heading">Contact information</h2>
+              <div className="field-group">
+                <fieldset className="field-container">
+                  <div className="field-child field-child--width-12 field-left field-right field-top">
+                    <div className="input-wrapper">
+                      <div className="input-container">
+                        <div className="input-icon">
+                          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M16 3.6C16 2.72 15.28 2 14.4 2H1.6C0.72 2 0 2.72 0 3.6L0 12.4C0 13.28 0.72 14 1.6 14H14.4C15.28 14 16 13.28 16 12.4V3.6ZM14.4 3.6L8 7.6L1.6 3.6H14.4ZM14.4 12.4H1.6V5.2L8 9.2L14.4 5.2V12.4Z"></path>
+                          </svg>
+                        </div>
+                        <input
+                          className="input input-with-icon"
+                          type="email"
+                          name="email"
+                          placeholder="email@example.com"
+                          value={billingInfo.email}
+                          onChange={handleInputChange}
+                          required
+                          disabled={isSubmitting || processing}
+                        />
+                      </div>
+                    </div>
+                    {errors.email && <p className="error-message">{errors.email}</p>}
+                  </div>
+                  
+                  <div className="field-child field-child--width-12 field-left field-right field-bottom">
+                    <div className="input-wrapper">
+                      <div className="input-container phone-wrapper">
+                         <div className="input-icon">
+                            <div className="flag-icon-wrapper">
+                              {selectedCountry && <img className="flag-icon" src={getFlagIcon(selectedCountry)} alt={selectedCountry} />}
+                            </div>
+                         </div>
+                        <input
+                          className="input phone-input input-with-icon"
+                          type="tel"
+                          name="phone"
+                          placeholder="Phone (optional)"
+                          value={billingInfo.phone || ''}
+                          onChange={handleInputChange}
+                          disabled={isSubmitting || processing}
+                        />
+                      </div>
+                    </div>
+                    {errors.phone && <p className="error-message">{errors.phone}</p>}
+                  </div>
+                </fieldset>
+              </div>
+            </div>
+
+            {/* Payment Method */}
+            <div>
+              <h2 className="form-heading">Payment method</h2>
+              <div className="accordion">
+                {/* Card Payment Method */}
+                <div className="accordion-item">
+                  <div className="accordion-header" onClick={() => handlePaymentMethodChange('card')}>
+                    <input
+                      id="payment-method-card"
+                      name="payment-method"
+                      type="radio"
+                      className="radio-btn"
+                      value="card"
+                      checked={selectedPaymentMethod === 'card'}
+                      onChange={() => handlePaymentMethodChange('card')}
+                    />
+                    <div className="payment-title-inner">
+                        <div className="payment-icon">
+                            <img src="https://js.stripe.com/v3/fingerprinted/img/card-ce24697297bd3c6a00fdd2fb6f760f0d.svg" alt="Card" />
+                        </div>
+                        <div className="payment-title-text">Card</div>
+                    </div>
+                    <div className="brand-icons-container">
+                        <img src="https://js.stripe.com/v3/fingerprinted/img/visa-729c05c240c4bdb47b03ac81d9945bfe.svg" alt="Visa" className="brand-icon"/>
+                        <img src="https://js.stripe.com/v3/fingerprinted/img/mastercard-4d8844094130711885b5e41b28c9848f.svg" alt="Mastercard" className="brand-icon"/>
+                        <img src="https://js.stripe.com/v3/fingerprinted/img/amex-a49b82f46c5cd6a96a6e418a6ca1717c.svg" alt="Amex" className="brand-icon"/>
+                    </div>
+                  </div>
+                  {selectedPaymentMethod === 'card' && (
+                    <div className="accordion-content">
+                      <div className="flex flex-col gap-16">
+                        {/* Card Information */}
+                        <div className="field-group">
+                          <label className="field-label">Card information</label>
+<div className="card-group">
+  <div className="card-number-input">
+    <CardNumberElement options={CARD_ELEMENT_OPTIONS} />
+  </div>
+  
+  <div className="card-row">
+    <div className="card-expiry">
+      <CardExpiryElement options={CARD_ELEMENT_OPTIONS} />
+    </div>
+    <div className="card-cvc">
+      <CardCvcElement options={CARD_ELEMENT_OPTIONS} />
+    </div>
+  </div>
+</div>
+                        </div>
+
+                        {/* Billing Details */}
+                        <div className="field-group">
+                           <label className="field-label">Billing address</label>
+                           <fieldset>
+                             <div className="field-container">
+                               <div className="field-child field-child--width-12 field-left field-right field-top">
+                                 <div className="input-container">
+                                   <input className="input" name="name" placeholder="Cardholder name" value={billingInfo.name} onChange={handleInputChange} required />
+                                 </div>
+                                 {errors.name && <p className="error-message">{errors.name}</p>}
+                               </div>
+
+                               <div className="field-child field-child--width-12 field-left field-right">
+                                  <div className="input-wrapper">
+                                      <div className="select-wrapper">
+                                          <select name="country" className="select" value={selectedCountry} onChange={handleCountryChange} required>
+                                            <option value="" disabled>Country or region</option>
+                                            {countries.map(c => <option key={c.isoCode} value={c.isoCode}>{c.name}</option>)}
+                                          </select>
+                                          <svg className="select-arrow" focusable="false" viewBox="0 0 12 12"><path d="M10.193 3.97a.75.75 0 0 1 1.062 1.062L6.53 9.756a.75.75 0 0 1-1.06 0L.745 5.032A.75.75 0 0 1 1.807 3.97L6 8.163l4.193-4.193z" fillRule="evenodd"></path></svg>
+                                      </div>
+                                  </div>
+                                  {errors.country && <p className="error-message">{errors.country}</p>}
+                               </div>
+
+                               <div className="field-child field-child--width-12 field-left field-right">
+                                 <div className="input-container"><input className="input" name="address" placeholder="Address line 1" value={billingInfo.address} onChange={handleInputChange} required /></div>
+                                 {errors.address && <p className="error-message">{errors.address}</p>}
+                               </div>
+
+                               <div className="field-child field-child--width-12 field-left field-right">
+                                 <div className="input-container"><input className="input" name="addressLine2" placeholder="Address line 2 (optional)" value={addressLine2} onChange={e => setAddressLine2(e.target.value)} /></div>
+                               </div>
+
+                               {/* START: Added City Field */}
+                               <div className="field-child field-child--width-12 field-left field-right">
+                                 <div className="input-container">
+                                   <input
+                                     className="input"
+                                     name="city"
+                                     placeholder="City"
+                                     value={billingInfo.city}
+                                     onChange={handleInputChange}
+                                     required
+                                   />
+                                 </div>
+                                 {errors.city && <p className="error-message">{errors.city}</p>}
+                               </div>
+                               {/* END: Added City Field */}
+
+                               <div className="field-child field-child--width-6 field-left field-bottom">
+                                 {states.length > 0 ? (
+                                   <div className="input-wrapper">
+                                    <div className="select-wrapper">
+                                      <select name="state" className="select" value={billingInfo.state} onChange={handleStateChange} required>
+                                        <option value="" disabled>State</option>
+                                        {states.map(s => <option key={s.isoCode} value={s.isoCode}>{s.name}</option>)}
+                                      </select>
+                                      <svg className="select-arrow" focusable="false" viewBox="0 0 12 12"><path d="M10.193 3.97a.75.75 0 0 1 1.062 1.062L6.53 9.756a.75.75 0 0 1-1.06 0L.745 5.032A.75.75 0 0 1 1.807 3.97L6 8.163l4.193-4.193z" fillRule="evenodd"></path></svg>
+                                    </div>
+                                   </div>
+                                 ) : (
+                                   <div className="input-container"><input className="input" name="state" placeholder="State / Province" value={billingInfo.state} onChange={handleInputChange} /></div>
+                                 )}
+                                 {errors.state && <p className="error-message">{errors.state}</p>}
+                               </div>
+
+                               <div className="field-child field-child--width-6 field-right field-bottom">
+                                 <div className="input-container"><input className="input" name="postalCode" placeholder="ZIP / Postal code" value={billingInfo.postalCode} onChange={handleInputChange} required /></div>
+                                 {errors.postalCode && <p className="error-message">{errors.postalCode}</p>}
+                               </div>
+                             </div>
+                           </fieldset>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* PIX Payment Method */}
+                {pixSupported && (
+                  <div className="accordion-item">
+                    <div className="accordion-header" onClick={() => handlePaymentMethodChange('pix')}>
+                      <input
+                        id="payment-method-pix"
+                        name="payment-method"
+                        type="radio"
+                        className="radio-btn"
+                        value="pix"
+                        checked={selectedPaymentMethod === 'pix'}
+                        onChange={() => handlePaymentMethodChange('pix')}
+                      />
+                      <div className="payment-title-inner">
+                        <div className="payment-icon pix-icon">PIX</div>
+                        <div className="payment-title-text">PIX</div>
+                      </div>
+                    </div>
+                    {selectedPaymentMethod === 'pix' && (
+                       <div className="accordion-content">
+                         <p style={{fontSize: '14px', color: 'hsla(0,0%,10%,0.7)'}}>You will receive PIX payment instructions after clicking "Pay".</p>
+                       </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Save Information */}
+            <div className="signup-form">
+              <div className="signup-header">
+                <label htmlFor="save-info-checkbox" className="checkbox-field">
+                  <input
+                    id="save-info-checkbox"
+                    name="saveInfo"
+                    type="checkbox"
+                    className="checkbox-input"
+                    checked={saveInfo}
+                    onChange={(e) => setSaveInfo(e.target.checked)}
+                  />
+                  <span className="checkbox-styled">
+                    <svg className="checkbox-tick" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z" />
+                    </svg>
+                  </span>
+                  <div className="checkbox-label">
+                      <div className="signup-label-header">Save my info for 1-click checkout with Link</div>
+                      <div className="signup-sub-label">Securely pay on this site and everywhere Link is accepted.</div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            {paymentError && <div className="payment-error-display">{paymentError}</div>}
+
+            {/* Submit Button */}
+            <button
+              type="submit"
+              className="submit-btn"
+              disabled={isSubmitting || processing || (selectedPaymentMethod === 'card' && (!stripe || !elements))}
+            >
+              {isSubmitting || processing ? (
+                <>
+                  <div className="spinner"></div>
+                  Processing...
+                </>
+              ) : (
+                `Pay ${getDisplayAmount()}`
+              )}
+            </button>
+          </div>
+        </form>
+
+        <footer className="footer">
+          <div>Your payment information is secure.</div>
+          <div className="footer-links">
+            <a href="#" className="footer-link">Terms</a>
+            <a href="#" className="footer-link">Privacy</a>
+          </div>
+        </footer>
+      </main>
+    </>
+  );
+};
+
+const PaymentForm: React.FC<PaymentFormProps> = ({ 
+  currency, 
+  amount,
+  transactionId,
+  onSubmit,
+  isSubmitting,
+  productOwnerId,
+  productId,
+  productName,
+  quantity,
+  onCountryChange,
+  onStateChange
+}) => {
+  const [billingInfo, setBillingInfo] = useState<IBillingInfo>({
+    email: '', phone: '', name: '', address: '', city: '', state: '', postalCode: '', country: '',
+  });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  // Initialize Stripe promise immediately instead of in useEffect
+  const [stripeApiPromise] = useState<Promise<Stripe | null> | null>(() => {
+    logger.info('[PaymentForm] Initializing Stripe.js promise immediately.');
+    const promise = getStripeInstance();
+    promise.catch(err => {
+        logger.error('[PaymentForm] Stripe promise rejected:', err);
+    });
+    return promise;
+  });
+  const [stripeError, setStripeError] = useState<string>('');
+
+  useEffect(() => {
+    const detectCountry = async () => {
+      try {
+        const countryIsoCode = await getUserCountry();
+        logger.info("[PaymentForm] Detected user country:", countryIsoCode);
+        if (countryIsoCode) {
+            setBillingInfo(prev => ({ ...prev, country: countryIsoCode }));
+            if (onCountryChange) {
+              onCountryChange(countryIsoCode);
+            }
+        }
+      } catch (error) {
+        logger.error('[PaymentForm] Error detecting country, defaulting to US:', error);
+        setBillingInfo(prev => ({ ...prev, country: 'US' }));
+        if (onCountryChange) {
+          onCountryChange('US');
+        }
+      }
+    };
+    detectCountry();
+  }, [onCountryChange]);
+
+  // Monitor stripe promise for errors
+  useEffect(() => {
+    if (stripeApiPromise) {
+      stripeApiPromise.catch(err => {
+        setStripeError('Could not connect to payment processor. Please check the configuration and try again.');
+      });
+    }
+  }, [stripeApiPromise]);
+
+  if (stripeError) {
+    return (
+      <div style={{
+        background: 'white',
+        borderRadius: '6px',
+        border: '1px solid #fecaca',
+        padding: '20px',
+        textAlign: 'center',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", "Ubuntu", sans-serif'
+      }}>
+        <h3 style={{fontSize: '16px', fontWeight: '500', color: '#32325d', marginBottom: '8px'}}>
+          Payment Unavailable
+        </h3>
+        <p style={{color: '#6b7c93', marginBottom: '16px', fontSize: '14px'}}>{stripeError}</p>
+        <button 
+          onClick={() => window.location.reload()} 
+          style={{
+            padding: '8px 16px',
+            background: '#0073E6',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            fontSize: '14px',
+            cursor: 'pointer'
+          }}
+        >
+          Try Again
+        </button>
+      </div>
+    );
+  }
+
+if (!stripeApiPromise) {
+    return (
+      <div style={{
+        background: 'white',
+        borderRadius: '6px',
+        padding: '40px',
+        textAlign: 'center',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", "Ubuntu", sans-serif'
+      }}>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          margin: '0 auto 20px'
+        }}>
+          <div style={{
+            width: '20px',
+            height: '20px',
+            background: '#635bff',
+            borderRadius: '50%',
+            animation: 'pulse 1.5s ease-in-out infinite',
+            margin: '0 3px'
+          }}></div>
+          <div style={{
+            width: '20px',
+            height: '20px',
+            background: '#635bff',
+            borderRadius: '50%',
+            animation: 'pulse 1.5s ease-in-out infinite 0.2s',
+            margin: '0 3px'
+          }}></div>
+          <div style={{
+            width: '20px',
+            height: '20px',
+            background: '#635bff',
+            borderRadius: '50%',
+            animation: 'pulse 1.5s ease-in-out infinite 0.4s',
+            margin: '0 3px'
+          }}></div>
+        </div>
+        <style jsx>{`
+          @keyframes pulse {
+            0%, 80%, 100% { 
+              transform: scale(0.8);
+              opacity: 0.5;
+            }
+            40% { 
+              transform: scale(1);
+              opacity: 1;
+            }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
+  return (
+    <Elements stripe={stripeApiPromise}>
+      <CheckoutForm
+        currency={currency}
+        amount={amount}
+        transactionId={transactionId}
+        onSubmit={onSubmit}
+        isSubmitting={isSubmitting}
+        billingInfo={billingInfo}
+        setBillingInfo={setBillingInfo}
+        errors={errors}
+        setErrors={setErrors}
+        productOwnerId={productOwnerId}
+        productId={productId}
+        productName={productName}
+        quantityParam={quantity}
+        onCountryChange={onCountryChange}
+        onStateChange={onStateChange}
+      />
+    </Elements>
+  );
+};
+
+export default PaymentForm;
+
+ProductDisplay.tsx
+// productcomponents/ProductDisplay.tsx
+'use client';
+
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import { IProduct, IVariantSelection, IBillingInfo, ITransactionItem } from '../productlib/types';
+import { formatPrice, getUserCurrency, convertPrice, isPixSupported } from '../productlib/currency';
+import { isProductInStock, calculateShippingFee, generateTransactionId as generateFrontendTxId } from '../productlib/utils';
+import { createTransaction, getIPAddress, getDeviceInfo } from '../productlib/api';
+import { calculateVATAmount, getTaxInfo } from '../productlib/tax';
+import PaymentForm from './PaymentForm';
+import CheckoutSummary from './CheckoutSummary';
+
+interface ProductWithLocalCurrency extends IProduct {
+  localPrice?: number;
+  localCurrency?: string;
+}
+
+interface ProductDisplayProps {
+  product: IProduct;
+}
+
+const ProductDisplay: React.FC<ProductDisplayProps> = ({ product: initialProduct }) => {
+  const router = useRouter();
+  const [product, setProduct] = useState<ProductWithLocalCurrency>(initialProduct);
+  const [isLoading, setIsLoading] = useState(true);
+  const [localCurrency, setLocalCurrency] = useState<string>('');
+  const [quantity, setQuantity] = useState(1);
+  const [variantSelections, setVariantSelections] = useState<IVariantSelection[]>([]);
+  const [selectedShipping, setSelectedShipping] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string>('');
+  const [transactionId, setTransactionId] = useState<string>('');
+
+  const [selectedCountry, setSelectedCountry] = useState<string>('');
+  const [selectedState, setSelectedState] = useState<string>('');
+  const [currentVAT, setCurrentVAT] = useState<number>(0);
+  const [taxInfo, setTaxInfo] = useState<{ rate: number; type: string; currency: string }>({ rate: 0, type: 'none', currency: 'USD' });
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const [showMobileSummary, setShowMobileSummary] = useState(false);
+  const [showQuantityModal, setShowQuantityModal] = useState(false);
+
+  useEffect(() => {
+    // Generate transaction ID early
+    setTransactionId(generateFrontendTxId());
+    
+    const fetchUserCurrencyAndProductDetails = async () => {
+      try {
+        setIsLoading(true);
+        const currency = await getUserCurrency();
+        setLocalCurrency(currency);
+        
+        if (currency && currency !== initialProduct.defaultCurrency && initialProduct.autoLocalPrice) {
+          try {
+            const convertedPrice = await convertPrice(initialProduct.price, initialProduct.defaultCurrency, currency);
+            setProduct({ ...initialProduct, localPrice: convertedPrice, localCurrency: currency });
+          } catch (convError) {
+            console.error('[ProductDisplay] Error converting price:', convError);
+            setProduct(initialProduct);
+          }
+        } else {
+          setProduct(initialProduct);
+        }
+      } catch (error) {
+        console.error('[ProductDisplay] Error fetching user currency:', error);
+        setLocalCurrency(initialProduct.defaultCurrency);
+        setProduct(initialProduct);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    fetchUserCurrencyAndProductDetails();
+
+    if (initialProduct.type === 'physical' && initialProduct.physical?.shippingMethods?.length) {
+      setSelectedShipping(initialProduct.physical.shippingMethods[0].name);
+    }
+
+    // Initialize variant selections
+    if (initialProduct.variants && initialProduct.variants.length > 0) {
+      const initialSelections = initialProduct.variants.map(variant => ({
+        name: variant.name,
+        value: '',
+      }));
+      setVariantSelections(initialSelections);
+    }
+  }, [initialProduct]);
+
+  // Fixed VAT calculation with debouncing and stable references
+  useEffect(() => {
+    const updateVAT = async () => {
+      if (!selectedCountry) {
+        setCurrentVAT(0);
+        setTaxInfo({ rate: 0, type: 'none', currency: 'USD' });
+        return;
+      }
+
+      try {
+        console.log(`[ProductDisplay] Calculating VAT for country: ${selectedCountry}, state: ${selectedState}`);
+        
+        // Get the actual price to calculate VAT on (including conversion)
+        const priceForVAT = product.localPrice || initialProduct.price;
+        const subtotal = priceForVAT * quantity;
+        
+        // Calculate VAT - always enabled now
+        const vatAmount = await calculateVATAmount(subtotal, selectedCountry, selectedState);
+        console.log(`[ProductDisplay] VAT calculated: ${vatAmount} for subtotal: ${subtotal}`);
+        setCurrentVAT(vatAmount);
+
+        // Get tax info for display
+        const info = await getTaxInfo(selectedCountry, selectedState);
+        console.log(`[ProductDisplay] Tax info:`, info);
+        setTaxInfo(info);
+      } catch (error) {
+        console.error('Error updating VAT:', error);
+        setCurrentVAT(0);
+        setTaxInfo({ rate: 0, type: 'none', currency: 'USD' });
+      }
+    };
+
+    // Debounce the VAT calculation to prevent rapid recalculation
+    const timeoutId = setTimeout(updateVAT, 200);
+    return () => clearTimeout(timeoutId);
+  }, [selectedCountry, selectedState, quantity, product.localPrice, initialProduct.price]);
+
+  const paymentDetails = useMemo(() => {
+    // Get the display price and currency
+    const displayPrice = product.localPrice ?? initialProduct.price;
+    const displayCurrency = product.localCurrency || initialProduct.defaultCurrency;
+    
+    // Calculate components
+    const subtotal = displayPrice * quantity;
+    const shipping = calculateShippingFee(initialProduct, selectedShipping);
+    const vat = currentVAT;
+    const total = subtotal + vat + shipping;
+
+    console.log(`[ProductDisplay] Payment details - Subtotal: ${subtotal}, VAT: ${vat}, Shipping: ${shipping}, Total: ${total}`);
+
+    // Amount for Stripe must be in the smallest currency unit (e.g., cents, pence)
+    const totalSmallestUnit = Math.round(total * 100);
+
+    return {
+      amount: totalSmallestUnit,
+      currency: displayCurrency,
+      subtotal,
+      vat,
+      shipping,
+      total,
+      displayPrice,
+      displayCurrency
+    };
+  }, [product, initialProduct, quantity, selectedShipping, currentVAT]);
+
+  // Check if product can be purchased (stock availability)
+  const canPurchase = useMemo(() => {
+    // Check if all required variants are selected
+    if (initialProduct.variants && initialProduct.variants.length > 0) {
+      const allVariantsSelected = variantSelections.every(selection => selection.value);
+      if (!allVariantsSelected) {
+        return false;
+      }
+    }
+
+    return isProductInStock(initialProduct, variantSelections, quantity);
+  }, [initialProduct, variantSelections, quantity]);
+
+  // Get maximum available quantity
+  const maxQuantity = useMemo(() => {
+    if (initialProduct.type === 'digital') {
+      return 999; // Digital products have no quantity limit
+    }
+
+    if (initialProduct.type === 'physical') {
+      // Check if stock management is enabled
+      let hasStockManagement = false;
+      let minStock = 999;
+
+      // If variants exist, check variant stock management
+      if (initialProduct.variants && initialProduct.variants.length > 0) {
+        const allVariantsSelected = variantSelections.every(selection => selection.value);
+        if (!allVariantsSelected) {
+          return 1;
+        }
+
+        // Check if any variant has stock management enabled
+        for (const variant of initialProduct.variants) {
+          const selection = variantSelections.find(s => s.name === variant.name);
+          if (selection && variant.stock !== undefined) {
+            hasStockManagement = true;
+            minStock = Math.min(minStock, variant.stock);
+          }
+        }
+      } else {
+        // No variants - check product stock management
+        if (initialProduct.physical?.stock !== undefined) {
+          hasStockManagement = true;
+          minStock = initialProduct.physical.stock;
+        }
+      }
+
+      // If no stock management is enabled, return unlimited (999)
+      if (!hasStockManagement) {
+        return 999;
+      }
+
+      return Math.max(0, minStock);
+    }
+
+    return 999;
+  }, [initialProduct, variantSelections]);
+
+  const handleSubmit = async (
+    billingInfo: IBillingInfo,
+    paymentMethod: 'card' | 'pix' | 'paypal' | 'wallet' | 'other',
+    statusFromStripe: 'pending' | 'successful' | 'canceled',
+    paymentIntentIdFromStripe?: string
+  ) => {
+    if (!transactionId) {
+      console.error("[ProductDisplay] handleSubmit: transactionId is missing.");
+      setErrorMessage("A transaction ID is missing. Please refresh and try again.");
+      setIsSubmitting(false);
+      return;
+    }
+    
+    console.log(`[ProductDisplay] handleSubmit. PaymentProvider Status: ${statusFromStripe}, PI_ID: ${paymentIntentIdFromStripe}, App TxID: ${transactionId}, Qty: ${quantity}`);
+    
+    setIsSubmitting(true);
+    setErrorMessage('');
+      
+    try {
+      const { deviceInfo, browserInfo } = getDeviceInfo();
+      const ipAddress = await getIPAddress();
+      
+      // Use the calculated payment details which include VAT
+      const { subtotal, vat, shipping, total, displayCurrency } = paymentDetails;
+
+      // Prepare items array in the format expected by backend
+      const items: ITransactionItem[] = [{
+        productId: initialProduct._id,
+        productSlug: initialProduct.slug,
+        productName: initialProduct.title,
+        productType: initialProduct.type,
+        productOwnerId: initialProduct.merchantId || '',
+        quantity: quantity,
+        unitPrice: product.localPrice || initialProduct.price,
+        totalPrice: subtotal, // This is unitPrice * quantity
+        currency: displayCurrency,
+        vatEnabled: true, // Always enabled now
+        vatAmount: vat,
+        variants: variantSelections.length > 0 ? variantSelections : undefined,
+      }];
+
+      const transactionData = {
+        items,
+        saleCurrency: displayCurrency,
+        total: total, // This includes VAT
+        subtotal: subtotal,
+        shippingFee: shipping,
+        paymentMethod,
+        buyerEmail: billingInfo.email,
+        buyerPhone: billingInfo.phone || '',
+        billingName: billingInfo.name,
+        billingAddress: billingInfo.address,
+        billingCity: billingInfo.city,
+        billingState: billingInfo.state,
+        billingPostalCode: billingInfo.postalCode,
+        billingCountry: billingInfo.country,
+        ipAddress: ipAddress || '127.0.0.1',
+        deviceInfo: deviceInfo || 'Unknown Device',
+        browserInfo: browserInfo || 'Unknown Browser',
+        status: statusFromStripe,
+        
+        ...(paymentMethod === 'card' && {
+          useStripe: true,
+          paymentIntentId: paymentIntentIdFromStripe,
+        }),
+        
+        metadata: {
+          transactionId: transactionId,
+          client_quantity: quantity,
+          client_selectedShipping: selectedShipping,
+          client_variantSelections: variantSelections,
+          client_localCurrencyAttempt: localCurrency,
+          stripe_charged_amount_smallest_unit: paymentDetails.amount,
+          stripe_charged_currency: paymentDetails.currency,
+          initial_product_price: initialProduct.price,
+          initial_product_currency: initialProduct.defaultCurrency,
+          auto_local_price_setting: initialProduct.autoLocalPrice,
+          converted_unit_local_price: product.localPrice,
+          converted_local_currency: product.localCurrency,
+          productSource: initialProduct.productSource || 'hosted',
+          vat_amount: vat,
+          vat_rate: taxInfo.rate,
+          vat_country: selectedCountry,
+          vat_state: selectedState,
+          // Additional metadata for better transaction tracking
+          product_sku: initialProduct.sku,
+          product_barcode: initialProduct.barcode,
+          product_type: initialProduct.type,
+          quantity_enabled: initialProduct.quantityEnabled,
+          // Digital product specific metadata
+          ...(initialProduct.type === 'digital' && initialProduct.digital?.recurring && {
+            subscription_interval: initialProduct.digital.recurring.interval,
+            subscription_has_trial: initialProduct.digital.recurring.hasTrial,
+            subscription_trial_days: initialProduct.digital.recurring.trialDays,
+          }),
+          // Physical product specific metadata
+          ...(initialProduct.type === 'physical' && {
+            shipping_method: selectedShipping,
+            has_variants: (initialProduct.variants?.length || 0) > 0,
+            selected_variants: variantSelections,
+            stock_managed: initialProduct.physical?.stock !== undefined,
+            product_weight: initialProduct.physical?.weight,
+            product_dimensions: initialProduct.physical?.dimensions,
+          }),
+        },
+      };
+      
+      console.log('[ProductDisplay] Creating/Updating transaction with data for backend:', JSON.stringify(transactionData, null, 2));
+      const response = await createTransaction(transactionData);
+      
+      if (response.success && response.data?.transactionId) {
+        const finalStatus = response.data.transaction?.status || statusFromStripe;
+        console.log(`[ProductDisplay] Backend transaction successful. TxID: ${response.data.transactionId}, Final Status: ${finalStatus}`);
+        
+        // Always redirect to payment status page with our transaction ID
+        router.push(`/product/payment?transactionId=${transactionId}&status=${finalStatus}`);
+      } else {
+        console.error('[ProductDisplay] Failed to process transaction on backend:', response.message, response.errors);
+        const backendErrorMsg = response.errors ? 
+          (typeof response.errors === 'string' ? response.errors : JSON.stringify(response.errors)) : 
+          response.message;
+        throw new Error(backendErrorMsg || 'Failed to process transaction on backend.');
+      }
+    } catch (error) {
+      console.error('[ProductDisplay] Error submitting transaction:', error);
+      setErrorMessage((error as Error).message || 'An unexpected error occurred during final submission.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleVariantChange = (variantName: string, value: string) => {
+    const newSelections = variantSelections.map(selection => 
+      selection.name === variantName 
+        ? { ...selection, value } 
+        : selection
+    );
+    setVariantSelections(newSelections);
+  };
+
+  const handleQuantityChange = (newQuantity: number) => {
+    const maxQty = maxQuantity;
+    const finalQuantity = Math.min(Math.max(1, newQuantity), maxQty);
+    setQuantity(finalQuantity);
+  };
+
+  // Fixed handlers with useCallback to prevent unnecessary re-renders
+  const handleCountryChange = useCallback((countryCode: string) => {
+    console.log(`[ProductDisplay] Country changed to: ${countryCode}`);
+    setSelectedCountry(prevCountry => {
+      if (prevCountry !== countryCode) {
+        setSelectedState(''); // Reset state when country changes
+        return countryCode;
+      }
+      return prevCountry;
+    });
+  }, []);
+
+  const handleStateChange = useCallback((stateCode: string) => {
+    console.log(`[ProductDisplay] State changed to: ${stateCode}`);
+    setSelectedState(prevState => prevState !== stateCode ? stateCode : prevState);
+  }, []);
+
+  const formatImageUrl = (url: string): string => {
+    // If it's already a full URL, use it as-is
+    if (url.startsWith('http')) {
+      return url;
+    }
+    
+    // Make sure URLs that start with /uploads have the proper /api prefix
+    if (url.startsWith('/uploads') && !url.startsWith('/api/uploads')) {
+      return `/api${url}`;
+    }
+    
+    // URLs that already have /api/uploads are good
+    if (url.startsWith('/api/uploads')) {
+      return url;
+    }
+    
+    // For all other cases, ensure it has the complete path
+    return `/api/uploads/${url.replace(/^\//, '')}`;
+  };
+
+  const getMainImageUrl = (): string => {
+    if (!product.images || product.images.length === 0) return '';
+    const mainImage = product.images.find(img => img.isMain) || product.images[0];
+    return mainImage ? formatImageUrl(mainImage.url) : '';
+  };
+
+  // Get available stock text
+  const getStockText = (): string => {
+    if (initialProduct.type === 'digital') {
+      return '';
+    }
+
+    // Check if stock management is enabled
+    let hasStockManagement = false;
+    let stock = 0;
+
+    // If variants exist
+    if (initialProduct.variants && initialProduct.variants.length > 0) {
+      const allVariantsSelected = variantSelections.every(selection => selection.value);
+      if (!allVariantsSelected) {
+        return 'Select all options to see availability';
+      }
+
+      // Check if any selected variant has stock management
+      let minStock = 999;
+      for (const variant of initialProduct.variants) {
+        const selection = variantSelections.find(s => s.name === variant.name);
+        if (selection && variant.stock !== undefined) {
+          hasStockManagement = true;
+          minStock = Math.min(minStock, variant.stock);
+        }
+      }
+      stock = minStock;
+    } else {
+      // No variants - check product stock
+      if (initialProduct.physical?.stock !== undefined) {
+        hasStockManagement = true;
+        stock = initialProduct.physical.stock;
+      }
+    }
+
+    // If no stock management is enabled, it means unlimited stock
+    if (!hasStockManagement) {
+      return ''; // Don't show any stock info for unlimited stock
+    }
+
+    if (stock === 0) {
+      return 'Out of stock';
+    } else if (stock < 10) {
+      return `Only ${stock} left in stock`;
+    } else {
+      return `${stock} available`;
+    }
+  };
+
+  // Format recurring subscription text
+  const getRecurringText = (): string => {
+    if (initialProduct.type !== 'digital' || !initialProduct.digital?.recurring) {
+      return '';
+    }
+
+    const { interval } = initialProduct.digital.recurring;
+    
+    let intervalText = '';
+    if (interval === 'monthly') {
+      intervalText = '/month';
+    } else if (interval === 'yearly') {
+      intervalText = '/year';
+    }
+
+    return intervalText;
+  };
+
+  // Get trial text
+  const getTrialText = (): string => {
+    if (initialProduct.type !== 'digital' || !initialProduct.digital?.recurring?.hasTrial) {
+      return '';
+    }
+
+    const trialDays = initialProduct.digital.recurring.trialDays || 0;
+    if (trialDays > 0) {
+      return `${trialDays}-day free trial`;
+    } else {
+      return 'Free trial';
+    }
+  };
+
+  const openQuantityModal = () => {
+    setShowQuantityModal(true);
+  };
+
+  const closeQuantityModal = () => {
+    setShowQuantityModal(false);
+  };
+
+if (isLoading || !transactionId) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        backgroundColor: '#f6f9fc',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '20px',
+      }}>
+        <div style={{
+          background: 'white',
+          borderRadius: '8px',
+          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.1)',
+          padding: '40px',
+          textAlign: 'center',
+          maxWidth: '400px',
+          width: '100%',
+        }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            margin: '0 auto 20px'
+          }}>
+            <div style={{
+              width: '12px',
+              height: '12px',
+              background: '#635bff',
+              borderRadius: '50%',
+              animation: 'bounce 1.4s ease-in-out infinite both',
+              margin: '0 2px'
+            }}></div>
+            <div style={{
+              width: '12px',
+              height: '12px',
+              background: '#635bff',
+              borderRadius: '50%',
+              animation: 'bounce 1.4s ease-in-out infinite both',
+              animationDelay: '-0.32s',
+              margin: '0 2px'
+            }}></div>
+            <div style={{
+              width: '12px',
+              height: '12px',
+              background: '#635bff',
+              borderRadius: '50%',
+              animation: 'bounce 1.4s ease-in-out infinite both',
+              animationDelay: '-0.16s',
+              margin: '0 2px'
+            }}></div>
+          </div>
+          <style jsx>{`
+            @keyframes bounce {
+              0%, 80%, 100% { 
+                transform: scale(0);
+                opacity: 0.5;
+              } 
+              40% { 
+                transform: scale(1);
+                opacity: 1;
+              }
+            }
+          `}</style>
+        </div>
+      </div>
+    );
+  }
+
+  const { subtotal, vat, shipping, total, displayPrice, displayCurrency } = paymentDetails;
+  const stockText = getStockText();
+  const recurringText = getRecurringText();
+  const trialText = getTrialText();
+
+  return (
+    <>
+      <style jsx>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        
+        @keyframes enterNoScale {
+          0% { opacity: 0; }
+          to { opacity: 1; }
+        }
+
+        @keyframes slideDown {
+          from {
+            transform: translateY(-100%);
+            opacity: 0;
+          }
+          to {
+            transform: translateY(0);
+            opacity: 1;
+          }
+        }
+
+        @keyframes slideUp {
+          from {
+            transform: translateY(100%);
+            opacity: 0;
+          }
+          to {
+            transform: translateY(0);
+            opacity: 1;
+          }
+        }
+
+        .modal-backdrop {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.4);
+          z-index: 1000;
+          display: flex;
+          align-items: flex-end;
+          justify-content: center;
+        }
+
+        .modal-content {
+          background: white;
+          width: 100%;
+          max-width: 500px;
+          border-radius: 12px 12px 0 0;
+          animation: slideUp 0.3s ease-out;
+          max-height: 80vh;
+          overflow-y: auto;
+        }
+
+        @media (min-width: 768px) {
+          .modal-backdrop {
+            align-items: center;
+          }
+          
+          .modal-content {
+            border-radius: 12px;
+            max-height: 600px;
+          }
+        }
+
+        .modal-header {
+          padding: 20px;
+          border-bottom: 1px solid #e6ebf1;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+
+        .modal-title {
+          font-size: 18px;
+          font-weight: 600;
+          color: #32325d;
+        }
+
+        .modal-close {
+          background: none;
+          border: none;
+          font-size: 24px;
+          color: #8898aa;
+          cursor: pointer;
+          padding: 0;
+          width: 32px;
+          height: 32px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 50%;
+          transition: all 0.2s;
+        }
+
+        .modal-close:hover {
+          background: #f8f9fa;
+          color: #32325d;
+        }
+
+        .modal-body {
+          padding: 24px;
+        }
+
+        .quantity-modal-controls {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 24px;
+          margin-bottom: 32px;
+        }
+
+        .quantity-modal-btn {
+          width: 48px;
+          height: 48px;
+          border: 1px solid #e6ebf1;
+          border-radius: 6px;
+          background: white;
+          color: #32325d;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 20px;
+          transition: all 0.15s;
+          box-shadow: 0 0 0 1px #e0e0e0, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+        }
+
+        .quantity-modal-btn:hover:not(:disabled) {
+          background: #f8f9fa;
+          box-shadow: 0 0 0 1px #635bff, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+        }
+
+        .quantity-modal-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        .quantity-modal-input {
+          width: 80px;
+          height: 48px;
+          border: 1px solid #e6ebf1;
+          border-radius: 6px;
+          text-align: center;
+          font-size: 20px;
+          font-weight: 600;
+          color: #32325d;
+          box-shadow: 0 0 0 1px #e0e0e0, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+        }
+
+        .quantity-modal-input:focus {
+          outline: none;
+          box-shadow: 0 0 0 1px rgba(50,151,211,0.7), 0 1px 1px 0 rgba(0,0,0,0.07), 0 0 0 4px rgba(50,151,211,0.3);
+        }
+
+        .stock-info-modal {
+          text-align: center;
+          font-size: 14px;
+          margin-bottom: 24px;
+          color: #8898aa;
+        }
+
+        .stock-info-modal.low {
+          color: #f59e0b;
+        }
+
+        .stock-info-modal.out {
+          color: #ef4444;
+        }
+
+        /* Mobile summary dropdown */
+        .mobile-summary-toggle {
+          display: none;
+        }
+
+        @media (max-width: 991.98px) {
+          .mobile-summary-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: #32325d;
+            cursor: pointer;
+            background: none;
+            border: none;
+            padding: 8px 0;
+          }
+
+          .mobile-summary-toggle svg {
+            width: 12px;
+            height: 12px;
+            transition: transform 0.2s;
+          }
+
+          .mobile-summary-toggle.open svg {
+            transform: rotate(180deg);
+          }
+
+          .mobile-summary-dropdown {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            background: white;
+            border-radius: 6px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            width: calc(100vw - 32px);
+            max-width: 380px;
+            margin-top: 8px;
+            animation: slideDown 0.3s ease-out;
+            z-index: 100;
+          }
+
+          .mobile-summary-content {
+            padding: 16px;
+          }
+        }
+
+        /* Main styles following HTML design */
+        * {
+          box-sizing: border-box;
+        }
+        
+        .container {
+          height: 100vh;
+          height: 100dvh;
+          display: flex;
+          justify-content: center;
+          align-items: flex-start;
+          background-color: #f7f7f7;
+        }
+        
+        .app {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          margin-top: 0;
+          width: 100%;
+          padding-top: 16px;
+          animation: enterNoScale 0.6s;
+          position: relative;
+        }
+        
+        .overview {
+          width: 100%;
+          padding: 0 16px 16px;
+        }
+        
+        .overview > * {
+          margin: 0 auto;
+          max-width: 380px;
+        }
+        
+        .payment {
+          background-color: white;
+          padding-top: 24px;
+          transition: background-color 0.4s ease-in-out;
+          z-index: 1;
+          padding: 0 16px 16px;
+          width: 100%;
+        }
+        
+        .payment > * {
+          margin: 0 auto;
+          max-width: 380px;
+        }
+        
+        /* Header */
+        .header {
+          min-height: 28px;
+          z-index: 12;
+          background-color: white;
+        }
+        
+        .header-content {
+          margin: auto;
+          max-width: 380px;
+          display: flex;
+          justify-content: space-between;
+          align-items: stretch;
+          position: relative;
+        }
+        
+        .business {
+          display: flex;
+          align-items: center;
+          max-width: 100%;
+          min-width: 0;
+        }
+        
+        .business > * {
+          flex: 0 1 auto;
+          max-width: 100%;
+          min-width: 0;
+        }
+        
+        .business-image {
+          flex-basis: auto;
+          flex-shrink: 0;
+        }
+        
+        .business-icon {
+          width: 28px;
+          height: 28px;
+          border-radius: 100%;
+          box-shadow: 0 2px 5px 0 rgba(50,50,93,0.1), 0 1px 1px 0 rgba(0,0,0,0.07);
+          margin-right: 8px;
+          background: white;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+        }
+        
+        .business-icon svg {
+          fill: hsla(0,0%,10%,0.5);
+          width: 12px;
+          height: 12px;
+        }
+        
+        .business-name {
+          color: hsla(0,0%,10%,0.9);
+          font-size: 14px;
+          font-weight: 500;
+          margin: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        
+        /* Product Summary */
+        .product-summary {
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          align-items: center;
+          cursor: default;
+          text-align: center;
+          margin-bottom: 24px;
+        }
+        
+        .product-summary.no-image {
+          margin-bottom: calc(16px + 12.5px);
+        }
+        
+        .product-info {
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          width: 100%;
+        }
+        
+        .product-name {
+          color: hsla(0,0%,10%,0.6);
+          font-size: 16px;
+          font-weight: 600;
+          margin-right: 20px;
+          position: relative;
+          word-break: break-word;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          display: -webkit-box;
+          -webkit-box-orient: vertical;
+          -webkit-line-clamp: 2;
+          max-width: 100%;
+        }
+        
+        .amounts-container {
+          position: relative;
+        }
+        
+        .totals-read {
+          opacity: 1;
+        }
+        
+        .total-amount-container {
+          display: flex;
+          align-items: flex-end;
+          justify-content: center;
+        }
+        
+        .total-amount {
+          font-size: 28px;
+          margin: 0 0 3px;
+          font-weight: 600;
+          color: hsla(0,0%,10%,0.9);
+          font-variant-numeric: tabular-nums;
+          letter-spacing: -0.03rem;
+        }
+
+        .subscription-interval {
+          font-size: 16px;
+          font-weight: 400;
+          color: hsla(0,0%,10%,0.6);
+          margin-left: 2px;
+        }
+        
+        .amounts-descriptions {
+          transition: all 0.3s ease;
+        }
+        
+        .product-description {
+          color: hsla(0,0%,10%,0.6);
+          font-size: 14px;
+          font-weight: 500;
+          display: block;
+          margin-bottom: 4px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          display: -webkit-box;
+          -webkit-box-orient: vertical;
+          max-width: 100%;
+        }
+
+        /* Product images section */
+        .product-images-section {
+          margin: 16px 0;
+        }
+
+        .product-image-main {
+          width: 100%;
+          max-width: 200px;
+          height: 150px;
+          background: #f6f9fc;
+          border-radius: 8px;
+          margin: 0 auto 12px;
+          overflow: hidden;
+          border: 1px solid #e6ebf1;
+          cursor: pointer;
+        }
+
+        .product-image-main img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          transition: transform 0.3s ease;
+        }
+
+        .product-image-main:hover img {
+          transform: scale(1.05);
+        }
+
+        .product-image-placeholder {
+          width: 100%;
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          color: hsla(0,0%,10%,0.5);
+          font-size: 14px;
+        }
+
+        .product-image-placeholder svg {
+          width: 32px;
+          height: 32px;
+          margin-bottom: 8px;
+          fill: currentColor;
+          opacity: 0.5;
+        }
+
+        .product-thumbnails {
+          display: flex;
+          gap: 8px;
+          justify-content: center;
+          flex-wrap: wrap;
+        }
+
+        .product-thumbnail {
+          width: 40px;
+          height: 40px;
+          border-radius: 4px;
+          overflow: hidden;
+          border: 2px solid transparent;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          background: #f6f9fc;
+        }
+
+        .product-thumbnail:hover {
+          border-color: #cfd7df;
+        }
+
+        .product-thumbnail.active {
+          border-color: #635bff;
+          box-shadow: 0 0 0 2px rgba(99, 91, 255, 0.2);
+        }
+
+        .product-thumbnail img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+
+/* Quantity selector */
+.quantity-section {
+  margin: 24px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center; /* This will center the block on all screens */
+  gap: 20px; /* Space between text and button */
+}
+
+.quantity-text-block {
+  text-align: left;
+}
+
+     .quantity-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: hsla(0,0%,10%,0.7);
+  margin-bottom: 4px;
+}
+
+        .quantity-button {
+          background: white;
+          border: 1px solid #e6ebf1;
+          border-radius: 6px;
+          padding: 8px 16px;
+          font-size: 16px;
+          font-weight: 500;
+          color: #32325d;
+          cursor: pointer;
+          transition: all 0.15s;
+          box-shadow: 0 0 0 1px #e0e0e0, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          min-width: 90px;
+        }
+
+        .quantity-button:hover {
+          box-shadow: 0 0 0 1px #635bff, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+        }
+
+        .quantity-button svg {
+          width: 12px;
+          height: 12px;
+          fill: currentColor;
+          margin-left: auto;
+        }
+
+        .stock-info {
+  font-size: 12px;
+  margin-top: 0; /* Reset margin as layout is now handled by flex */
+  text-align: left;
+  color: hsla(0,0%,10%,0.6);
+}
+
+        .stock-available {
+          color: #16a34a;
+        }
+
+        .stock-warning {
+          color: #f59e0b;
+        }
+
+        .stock-error {
+          color: #ef4444;
+        }
+
+        /* Product meta section */
+        .product-meta {
+          background: #f8f9fa;
+          border: 1px solid #e6ebf1;
+          border-radius: 6px;
+          padding: 16px;
+          margin: 16px 0;
+          font-size: 13px;
+        }
+
+        .meta-row {
+          display: flex;
+          justify-content: space-between;
+          margin-bottom: 8px;
+        }
+
+        .meta-row:last-child {
+          margin-bottom: 0;
+        }
+
+        .meta-label {
+          color: #6b7c93;
+          font-weight: 500;
+        }
+
+        .meta-value {
+          color: #32325d;
+          font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+        }
+
+
+
+        /* Tax information section */
+        .tax-info-section {
+          background: #f0f7ff;
+          border: 1px solid #bfdbfe;
+          border-radius: 6px;
+          padding: 16px;
+          margin: 16px 0;
+          font-size: 13px;
+          color: #1e40af;
+        }
+
+        .tax-info-title {
+          font-weight: 600;
+          margin-bottom: 8px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .tax-info-title svg {
+          width: 16px;
+          height: 16px;
+          fill: currentColor;
+        }
+
+        .tax-info-details {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+
+        /* Summary section for desktop */
+        .summary-section {
+          display: none;
+          margin-top: 24px;
+          background: #f8f9fa;
+          border: 1px solid #e6ebf1;
+          border-radius: 6px;
+          padding: 20px;
+        }
+
+        /* Responsive Design */
+        @media only screen and (min-width: 992px) {
+          .container {
+            height: 100%;
+          }
+          
+          .app {
+            align-items: stretch;
+            transform: translateY(max(48px, calc(50vh - 600px)));
+            padding-top: 0;
+            animation-delay: 0.2s;
+            animation-fill-mode: backwards;
+            flex-direction: row;
+            justify-content: space-between;
+            max-width: 920px;
+          }
+          
+          .overview {
+            padding-bottom: calc(16px + 12px);
+            margin-bottom: 0;
+            width: 380px;
+            margin: 0;
+            padding: 0;
+          }
+          
+          .payment {
+            height: 100%;
+            padding-top: 0;
+            margin: 0;
+            padding: 24px 20px 24px 20px;
+            width: 400px;
+          }
+          
+          .payment > * {
+            max-width: none;
+            margin: 0;
+          }
+          
+          .header {
+            background-color: inherit;
+          }
+          
+          .product-summary {
+            justify-content: left;
+            align-items: flex-start;
+            margin-top: 48px;
+            text-align: left;
+          }
+          
+          .total-amount {
+            font-size: 36px;
+          }
+          
+          .total-amount-container {
+            justify-content: flex-start;
+          }
+
+          .summary-section {
+            display: block;
+          }
+
+          .quantity-section {
+            text-align: left;
+          }
+        }
+
+        /* Variants styling */
+        .variants-section {
+          margin: 20px 0;
+        }
+
+        .variant-group {
+          margin-bottom: 16px;
+        }
+
+        .variant-label {
+          font-size: 13px;
+          font-weight: 500;
+          color: hsla(0,0%,10%,0.7);
+          margin-bottom: 8px;
+          display: block;
+        }
+
+        .variant-options {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+
+        .variant-option {
+          padding: 8px 16px;
+          border: 1px solid #e6ebf1;
+          border-radius: 6px;
+          background: white;
+          color: #32325d;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.15s;
+          box-shadow: 0 0 0 1px #e0e0e0, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+        }
+
+        .variant-option:hover:not(.disabled) {
+          box-shadow: 0 0 0 1px #635bff, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+        }
+
+        .variant-option.selected {
+          background: #635bff;
+          color: white;
+          border-color: #635bff;
+        }
+
+        .variant-option.disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        /* Shipping methods styling */
+        .shipping-section {
+          margin: 20px 0;
+        }
+
+        .shipping-label {
+          font-size: 13px;
+          font-weight: 500;
+          color: hsla(0,0%,10%,0.7);
+          margin-bottom: 8px;
+          display: block;
+        }
+
+        .shipping-options {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .shipping-option {
+          padding: 12px 16px;
+          border: 1px solid #e6ebf1;
+          border-radius: 6px;
+          background: white;
+          cursor: pointer;
+          transition: all 0.15s;
+          box-shadow: 0 0 0 1px #e0e0e0, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+
+        .shipping-option:hover {
+          box-shadow: 0 0 0 1px #635bff, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+        }
+
+        .shipping-option.selected {
+          border-color: #635bff;
+          box-shadow: 0 0 0 1px #635bff, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+        }
+
+        .shipping-option-info {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+
+        .shipping-option-name {
+          font-size: 14px;
+          font-weight: 500;
+          color: #32325d;
+        }
+
+        .shipping-option-details {
+          font-size: 12px;
+          color: hsla(0,0%,10%,0.6);
+        }
+
+        .shipping-option-price {
+          font-size: 14px;
+          font-weight: 500;
+          color: #32325d;
+        }
+
+        /* Subscription and trial badges */
+        .subscription-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 12px;
+          background: #f0f7ff;
+          border: 1px solid #3b82f6;
+          border-radius: 6px;
+          font-size: 12px;
+          color: #1d4ed8;
+          font-weight: 500;
+          margin: 8px 0;
+        }
+
+        .subscription-badge svg {
+          width: 14px;
+          height: 14px;
+          fill: currentColor;
+        }
+
+        .trial-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 12px;
+          background: #f0fdf4;
+          border: 1px solid #22c55e;
+          border-radius: 6px;
+          font-size: 12px;
+          color: #166534;
+          font-weight: 500;
+          margin: 8px 0;
+        }
+
+        .trial-badge svg {
+          width: 14px;
+          height: 14px;
+          fill: currentColor;
+        }
+
+        /* Error message */
+        .error-message {
+          background: #fef2f2;
+          border: 1px solid #fecaca;
+          border-radius: 6px;
+          padding: 16px;
+          margin-bottom: 20px;
+          color: #dc2626;
+          font-size: 14px;
+          text-align: center;
+        }
+
+        .availability-message {
+          background: #fef2f2;
+          border: 1px solid #fecaca;
+          border-radius: 6px;
+          padding: 16px;
+          margin: 20px 0;
+          color: #dc2626;
+          font-size: 14px;
+          text-align: center;
+        }
+      `}</style>
+      
+      <div className="container">
+        <div className="app">
+          <div className="overview">
+            <header className="header">
+              <div className="header-content">
+                <div style={{ flex: '0 1 auto', maxWidth: '100%', minWidth: 0, display: 'flex', alignItems: 'center' }}>
+                  <div className="business">
+                    <div className="business-icon business-image">
+                      <svg focusable="false" viewBox="0 0 16 16">
+                        <path d="M3 7.5V12h10V7.5c.718 0 1.398-.168 2-.468V15a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V7.032c.602.3 1.282.468 2 .468zM0 3L1.703.445A1 1 0 0 1 2.535 0h10.93a1 1 0 0 1 .832.445L16 3a3 3 0 0 1-5.5 1.659C9.963 5.467 9.043 6 8 6s-1.963-.533-2.5-1.341A3 3 0 0 1 0 3z" fillRule="evenodd"></path>
+                      </svg>
+                    </div>
+                    <h1 className="business-name">Store</h1>
+                  </div>
+                </div>
+                {/* Mobile summary toggle */}
+                <button
+                  className={`mobile-summary-toggle ${showMobileSummary ? 'open' : ''}`}
+                  onClick={() => setShowMobileSummary(!showMobileSummary)}
+                >
+                  Summary
+                  <svg viewBox="0 0 12 12" fill="currentColor">
+                    <path d="M10.193 3.97a.75.75 0 0 1 1.062 1.062L6.53 9.756a.75.75 0 0 1-1.06 0L.745 5.032A.75.75 0 0 1 1.807 3.97L6 8.163l4.193-4.193z" fillRule="evenodd"></path>
+                  </svg>
+                </button>
+                {showMobileSummary && (
+                  <div className="mobile-summary-dropdown">
+                    <div className="mobile-summary-content">
+                      <CheckoutSummary
+                        product={product}
+                        quantity={quantity}
+                        variantSelections={variantSelections}
+                        selectedShipping={selectedShipping}
+                        localCurrency={localCurrency}
+                        subtotal={subtotal}
+                        vat={vat}
+                        shipping={shipping}
+                        total={total}
+                        displayCurrency={displayCurrency}
+                        taxRate={taxInfo.rate}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </header>
+
+            <div className="product-summary">
+              {/* Product Images */}
+              <div className="product-images-section">
+                {product.images && product.images.length > 0 ? (
+                  <>
+                    <div className="product-image-main">
+                      <img 
+                        src={formatImageUrl(product.images[selectedImageIndex]?.url || product.images[0].url)} 
+                        alt={product.title} 
+                      />
+                    </div>
+                    
+                    {product.images.length > 1 && (
+                      <div className="product-thumbnails">
+                        {product.images.map((image, index) => (
+                          <button
+                            key={index}
+                            className={`product-thumbnail ${selectedImageIndex === index ? 'active' : ''}`}
+                            onClick={() => setSelectedImageIndex(index)}
+                            type="button"
+                          >
+                            <img
+                              src={formatImageUrl(image.url)}
+                              alt={`Thumbnail ${index + 1}`}
+                            />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="product-image-main">
+                    <div className="product-image-placeholder">
+                      <svg viewBox="0 0 24 24" fill="none">
+                        <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" fill="currentColor"/>
+                      </svg>
+                      <div>No image available</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="product-info">
+                <span className="product-name">
+                  <div style={{ WebkitLineClamp: 2 }}>{product.title}</div>
+                </span>
+                <div className="amounts-container">
+                  <div className="totals-read">
+                    <div className="total-amount-container">
+                      <div>
+                        <span className="total-amount">
+                          {formatPrice(total, displayCurrency)}
+                          {recurringText && (
+                            <span className="subscription-interval">{recurringText}</span>
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <div>
+                        <div className="amounts-descriptions">
+                          <span className="product-description">
+                            <div>
+                              <div>{product.shortDescription}</div>
+                            </div>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Trial and subscription badges */}
+                {trialText && (
+                  <div className="trial-badge">
+                    <svg viewBox="0 0 24 24" fill="none">
+                      <path d="M20 6h-2.18c.11-.31.18-.65.18-1a2.996 2.996 0 0 0-5.5-1.65l-.5.67-.5-.68C10.96 2.54 10.05 2 9 2 7.34 2 6 3.34 6 5c0 .35.07.69.18 1H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-5-2c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zM9 4c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1z" fill="currentColor"/>
+                    </svg>
+                    {trialText}
+                  </div>
+                )}
+                {recurringText && (
+                  <div className="subscription-badge">
+                    <svg viewBox="0 0 24 24" fill="none">
+                      <path d="M12 4V1L8 5L12 9V6C15.31 6 18 8.69 18 12C18 12.79 17.85 13.54 17.57 14.21L19.07 15.71C19.66 14.71 20 13.39 20 12C20 7.58 16.42 4 12 4ZM12 18C8.69 18 6 15.31 6 12C6 11.21 6.15 10.46 6.43 9.79L4.93 8.29C4.34 9.29 4 10.61 4 12C4 16.42 7.58 20 12 20V23L16 19L12 15V18Z" fill="currentColor"/>
+                    </svg>
+                    Subscription
+                  </div>
+                )}
+
+                {/* Product Meta Information (SKU, Barcode) */}
+                {(initialProduct.sku || initialProduct.barcode) && (
+                  <div className="product-meta">
+                    {initialProduct.sku && (
+                      <div className="meta-row">
+                        <span className="meta-label">SKU:</span>
+                        <span className="meta-value">{initialProduct.sku}</span>
+                      </div>
+                    )}
+                    {initialProduct.barcode && (
+                      <div className="meta-row">
+                        <span className="meta-label">Barcode:</span>
+                        <span className="meta-value">{initialProduct.barcode}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+{/* Quantity and Stock Section */}
+{initialProduct.quantityEnabled === true && (
+  <div className="quantity-section">
+    <div className="quantity-text-block">
+      <label className="quantity-label">Quantity</label>
+      {stockText && (
+        <div className={`stock-info ${
+          stockText.includes('Out of stock') ? 'stock-error' : 
+          stockText.includes('Only') ? 'stock-warning' : 'stock-available'
+        }`}>
+          {stockText}
+        </div>
+      )}
+    </div>
+    <button className="quantity-button" onClick={openQuantityModal}>
+      {quantity}
+      <svg viewBox="0 0 12 12" fill="currentColor">
+        <path d="M10.193 3.97a.75.75 0 0 1 1.062 1.062L6.53 9.756a.75.75 0 0 1-1.06 0L.745 5.032A.75.75 0 0 1 1.807 3.97L6 8.163l4.193-4.193z" fillRule="evenodd"></path>
+      </svg>
+    </button>
+  </div>
+)}
+
+
+
+                {/* Tax Information Display 
+                {selectedCountry && taxInfo.rate > 0 && (
+                  <div className="tax-info-section">
+                    <div className="tax-info-title">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M13,17H11V15H13V17M13,13H11V7H13V13Z" fill="currentColor"/>
+                      </svg>
+                      Tax Information
+                    </div>
+                    <div className="tax-info-details">
+                      <div>
+                        <svg style={{ width: '12px', height: '12px', marginRight: '4px', verticalAlign: 'middle' }} viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M12,11.5A2.5,2.5 0 0,1 9.5,9A2.5,2.5 0 0,1 12,6.5A2.5,2.5 0 0,1 14.5,9A2.5,2.5 0 0,1 12,11.5M12,2A7,7 0 0,0 5,9C5,14.25 12,22 12,22S19,14.25 19,9A7,7 0 0,0 12,2Z"/>
+                        </svg>
+                        Location: {selectedCountry}{selectedState ? `, ${selectedState}` : ''}
+                      </div>
+                      <div>
+                        <svg style={{ width: '12px', height: '12px', marginRight: '4px', verticalAlign: 'middle' }} viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M5,6H23V18H5V6M14,9A3,3 0 0,1 17,12A3,3 0 0,1 14,15A3,3 0 0,1 11,12A3,3 0 0,1 14,9M9,8A2,2 0 0,1 7,10V14A2,2 0 0,1 9,16H19A2,2 0 0,1 21,14V10A2,2 0 0,1 19,8H9Z"/>
+                        </svg>
+                        {taxInfo.type.toUpperCase()} Rate: {(taxInfo.rate * 100).toFixed(1)}%
+                      </div>
+                    </div>
+                  </div>
+                )} */}
+
+                {/* Desktop summary section */}
+                <div className="summary-section">
+                  <CheckoutSummary
+                    product={product}
+                    quantity={quantity}
+                    variantSelections={variantSelections}
+                    selectedShipping={selectedShipping}
+                    localCurrency={localCurrency}
+                    subtotal={subtotal}
+                    vat={vat}
+                    shipping={shipping}
+                    total={total}
+                    displayCurrency={displayCurrency}
+                    taxRate={taxInfo.rate}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Payment Section */}
+          <div className="payment">
+            <main>
+              {errorMessage && (
+                <div className="error-message">
+                  {errorMessage}
+                </div>
+              )}
+              
+              {!canPurchase && stockText && stockText.includes('Out of stock') ? (
+                <div className="availability-message">
+                  {stockText}
+                </div>
+              ) : (
+                <>
+                  {/* Variants Section */}
+                  {initialProduct.variants && initialProduct.variants.length > 0 && (
+                    <div className="variants-section">
+                      {initialProduct.variants.map((variant, variantIndex) => {
+                        const selection = variantSelections.find(s => s.name === variant.name);
+                        
+                        return (
+                          <div key={variantIndex} className="variant-group">
+                            <label className="variant-label">{variant.name}</label>
+                            <div className="variant-options">
+                              {variant.values.map((value, valueIndex) => {
+                                // Check if this variant value is available
+                                let isAvailable = true;
+                                let stockInfo = '';
+                                
+                                // Only check stock if stock management is enabled (variant.stock is defined)
+                                if (variant.stock !== undefined) {
+                                  if (variant.stock === 0) {
+                                    isAvailable = false;
+                                    stockInfo = 'Out of stock';
+                                  } else if (variant.stock < quantity) {
+                                    isAvailable = false;
+                                    stockInfo = `Only ${variant.stock} available`;
+                                  } else if (variant.stock < 10) {
+                                    stockInfo = `${variant.stock} left`;
+                                  }
+                                }
+                                
+                                const isSelected = selection?.value === value;
+                                
+                                return (
+                                  <button
+                                    key={valueIndex}
+                                    className={`variant-option ${isSelected ? 'selected' : ''} ${!isAvailable ? 'disabled' : ''}`}
+                                    onClick={() => isAvailable && handleVariantChange(variant.name, value)}
+                                    type="button"
+                                  >
+                                    {value}
+                                    {stockInfo && (
+                                      <span style={{ fontSize: '11px', marginLeft: '4px' }}>
+                                        ({stockInfo})
+                                      </span>
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  
+                  {/* Shipping Section - Only for physical products */}
+                  {initialProduct.type === 'physical' && initialProduct.physical?.shippingMethods && initialProduct.physical.shippingMethods.length > 0 && (
+                    <div className="shipping-section">
+                      <label className="shipping-label">Shipping Method</label>
+                      <div className="shipping-options">
+                        {initialProduct.physical.shippingMethods.map((method, index) => {
+                          const isSelected = selectedShipping === method.name;
+                          const shippingPrice = method.price > 0 
+                            ? formatPrice(method.price, initialProduct.defaultCurrency)
+                            : 'Free';
+                          
+                          return (
+                            <button
+                              key={index}
+                              className={`shipping-option ${isSelected ? 'selected' : ''}`}
+                              onClick={() => setSelectedShipping(method.name)}
+                              type="button"
+                            >
+                              <div className="shipping-option-info">
+                                <div className="shipping-option-name">{method.name}</div>
+                                <div className="shipping-option-details">
+                                  {method.minDays}-{method.maxDays} business days
+                                </div>
+                              </div>
+                              <div className="shipping-option-price">{shippingPrice}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Payment Form */}
+                  <PaymentForm
+                    currency={paymentDetails.currency}
+                    amount={paymentDetails.amount}
+                    transactionId={transactionId}
+                    onSubmit={handleSubmit}
+                    isSubmitting={isSubmitting}
+                    productOwnerId={initialProduct.merchantId || ''}
+                    productId={initialProduct._id}
+                    productName={initialProduct.title}
+                    quantity={quantity}
+                    onCountryChange={handleCountryChange}
+                    onStateChange={handleStateChange}
+                  />
+                </>
+              )}
+            </main>
+          </div>
+        </div>
+      </div>
+
+      {/* Quantity Modal */}
+      {showQuantityModal && (
+        <div className="modal-backdrop" onClick={closeQuantityModal}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Select Quantity</h3>
+              <button className="modal-close" onClick={closeQuantityModal}>
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="quantity-modal-controls">
+                <button
+                  className="quantity-modal-btn"
+                  onClick={() => handleQuantityChange(quantity - 1)}
+                  disabled={quantity <= 1}
+                >
+                  −
+                </button>
+                <input
+                  type="number"
+                  className="quantity-modal-input"
+                  value={quantity}
+                  onChange={(e) => handleQuantityChange(parseInt(e.target.value) || 1)}
+                  min="1"
+                  max={maxQuantity}
+                />
+                <button
+                  className="quantity-modal-btn"
+                  onClick={() => handleQuantityChange(quantity + 1)}
+                  disabled={quantity >= maxQuantity}
+                >
+                  +
+                </button>
+              </div>
+              
+              {maxQuantity < 999 && (
+                <div className={`stock-info-modal ${maxQuantity < 10 ? 'low' : ''}`}>
+                  Maximum available: {maxQuantity}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
+export default ProductDisplay;
+
+ProductImages.tsx
+// productcomponents/ProductImages.tsx
+'use client';
+
+import { useState } from 'react';
+import { IImage } from '../productlib/types';
+
+interface ProductImagesProps {
+  images: IImage[];
+}
+
+const ProductImages: React.FC<ProductImagesProps> = ({ images }) => {
+  // Find main image or use first image as default
+  const mainImage = images.find(img => img.isMain) || images[0];
+  const [selectedImage, setSelectedImage] = useState<string>(mainImage?.url || '');
+  
+  if (!images || images.length === 0) {
+    return (
+      <>
+        <style jsx>{`
+          .no-image-container {
+            width: 100%;
+            max-width: 200px;
+            height: 150px;
+            background: #f6f9fc;
+            border-radius: 8px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #e6ebf1;
+          }
+          
+          .no-image-content {
+            text-align: center;
+            color: #8898aa;
+          }
+          
+          .no-image-icon {
+            font-size: 32px;
+            margin-bottom: 8px;
+            opacity: 0.5;
+          }
+          
+          .no-image-text {
+            font-size: 14px;
+          }
+        `}</style>
+        
+        <div className="no-image-container">
+          <div className="no-image-content">
+            <div className="no-image-icon">
+              <i className="fas fa-image"></i>
+            </div>
+            <div className="no-image-text">No images available</div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  // Format the image URL to ensure it starts with /api/uploads if needed
+  const formatImageUrl = (url: string): string => {
+    // If it's already a full URL, use it as-is
+    if (url.startsWith('http')) {
+      return url;
+    }
+    
+    // Make sure URLs that start with /uploads have the proper /api prefix
+    if (url.startsWith('/uploads') && !url.startsWith('/api/uploads')) {
+      return `/api${url}`;
+    }
+    
+    // URLs that already have /api/uploads are good
+    if (url.startsWith('/api/uploads')) {
+      return url;
+    }
+    
+    // For all other cases, ensure it has the complete path
+    return `/api/uploads/${url.replace(/^\//, '')}`;
+  };
+
+  return (
+    <>
+      <style jsx>{`
+        .images-container {
+          width: 100%;
+        }
+        
+        .main-image {
+          width: 100%;
+          max-width: 200px;
+          height: 150px;
+          background: #f6f9fc;
+          border-radius: 8px;
+          margin: 0 auto 20px;
+          overflow: hidden;
+          border: 1px solid #e6ebf1;
+          cursor: pointer;
+        }
+        
+        .main-image img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          transition: transform 0.3s ease;
+        }
+        
+        .main-image:hover img {
+          transform: scale(1.05);
+        }
+        
+        .thumbnails {
+          display: flex;
+          gap: 8px;
+          justify-content: center;
+          flex-wrap: wrap;
+          padding: 0 10px;
+        }
+        
+        .thumbnail {
+          width: 48px;
+          height: 48px;
+          border-radius: 6px;
+          overflow: hidden;
+          border: 2px solid transparent;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          background: #f6f9fc;
+        }
+        
+        .thumbnail:hover {
+          border-color: #cfd7df;
+        }
+        
+        .thumbnail.active {
+          border-color: #635bff;
+          box-shadow: 0 0 0 2px rgba(99, 91, 255, 0.2);
+        }
+        
+        .thumbnail img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+        
+        @media (max-width: 768px) {
+          .main-image {
+            max-width: 150px;
+            height: 120px;
+          }
+          
+          .thumbnail {
+            width: 40px;
+            height: 40px;
+          }
+        }
+      `}</style>
+      
+      <div className="images-container">
+        {/* Main image display */}
+        <div className="main-image">
+          <img
+            src={formatImageUrl(selectedImage)}
+            alt="Product"
+          />
+        </div>
+        
+        {/* Thumbnails */}
+        {images.length > 1 && (
+          <div className="thumbnails">
+            {images.map((image, index) => (
+              <button
+                key={index}
+                className={`thumbnail ${selectedImage === image.url ? 'active' : ''}`}
+                onClick={() => setSelectedImage(image.url)}
+                type="button"
+              >
+                <img
+                  src={formatImageUrl(image.url)}
+                  alt={`Thumbnail ${index + 1}`}
+                />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  );
+};
+
+export default ProductImages;
+
+
+QuantitySelector.tsx
+// productcomponents/QuantitySelector.tsx
+'use client';
+
+import { useState } from 'react';
+import { IProduct } from '../productlib/types';
+
+interface QuantitySelectorProps {
+  product: IProduct;
+  quantity: number;
+  onQuantityChange: (quantity: number) => void;
+  maxQuantity?: number;
+  minQuantity?: number;
+}
+
+const QuantitySelector: React.FC<QuantitySelectorProps> = ({
+  product,
+  quantity,
+  onQuantityChange,
+  maxQuantity = 99,
+  minQuantity = 1
+}) => {
+  const [showMaxWarning, setShowMaxWarning] = useState(false);
+
+  // Determine actual max quantity based on stock if applicable
+  let actualMaxQuantity = maxQuantity;
+  
+  // Only check stock if stock management is enabled (stock is defined)
+  if (product.type === 'physical' && product.physical?.stock !== undefined) {
+    actualMaxQuantity = Math.min(maxQuantity, product.physical.stock);
+  }
+  
+  const handleQuantityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newQuantity = parseInt(e.target.value, 10);
+    
+    if (isNaN(newQuantity) || newQuantity < minQuantity) {
+      onQuantityChange(minQuantity);
+    } else if (newQuantity > actualMaxQuantity) {
+      onQuantityChange(actualMaxQuantity);
+      setShowMaxWarning(true);
+      setTimeout(() => setShowMaxWarning(false), 2000);
+    } else {
+      onQuantityChange(newQuantity);
+      setShowMaxWarning(false);
+    }
+  };
+
+  const handleInputBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    const newQuantity = parseInt(e.target.value, 10);
+    
+    if (isNaN(newQuantity) || newQuantity < minQuantity) {
+      onQuantityChange(minQuantity);
+    } else if (newQuantity > actualMaxQuantity) {
+      onQuantityChange(actualMaxQuantity);
+      setShowMaxWarning(true);
+      setTimeout(() => setShowMaxWarning(false), 2000);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Prevent entering non-numeric characters
+    if (!/[0-9]/.test(e.key) && 
+        !['Backspace', 'Delete', 'Tab', 'Escape', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+      e.preventDefault();
+    }
+  };
+  
+  const decreaseQuantity = () => {
+    if (quantity > minQuantity) {
+      onQuantityChange(quantity - 1);
+      setShowMaxWarning(false);
+    }
+  };
+  
+  const increaseQuantity = () => {
+    if (quantity < actualMaxQuantity) {
+      onQuantityChange(quantity + 1);
+    } else {
+      setShowMaxWarning(true);
+      setTimeout(() => setShowMaxWarning(false), 2000);
+    }
+  };
+  
+  return (
+    <>
+      <style jsx>{`
+        .quantity-container {
+          margin-bottom: 16px;
+        }
+        
+        .quantity-label {
+          display: block;
+          font-size: 13px;
+          font-weight: 500;
+          color: #6b7c93;
+          margin-bottom: 8px;
+        }
+        
+        .quantity-controls {
+          display: flex;
+          align-items: center;
+          gap: 0;
+          border: 1px solid #cfd7df;
+          border-radius: 4px;
+          overflow: hidden;
+          background: white;
+          width: fit-content;
+        }
+        
+        .quantity-btn {
+          width: 40px;
+          height: 40px;
+          border: none;
+          background: #f8f9fa;
+          color: #32325d;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 16px;
+          font-weight: 500;
+          transition: background-color 0.15s ease;
+          user-select: none;
+        }
+        
+        .quantity-btn:hover:not(:disabled) {
+          background: #e9ecef;
+        }
+        
+        .quantity-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+          background: #f8f9fa;
+        }
+        
+        .quantity-btn:active:not(:disabled) {
+          background: #dee2e6;
+        }
+        
+        .quantity-btn.decrease {
+          border-right: 1px solid #e6ebf1;
+        }
+        
+        .quantity-btn.increase {
+          border-left: 1px solid #e6ebf1;
+        }
+        
+        .quantity-input {
+          width: 60px;
+          height: 40px;
+          border: none;
+          text-align: center;
+          font-size: 16px;
+          color: #32325d;
+          background: white;
+          outline: none;
+          font-weight: 500;
+          -moz-appearance: textfield; /* Firefox */
+        }
+
+        .quantity-input::-webkit-outer-spin-button,
+        .quantity-input::-webkit-inner-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+        
+        .quantity-input:focus {
+          background: #f8f9fa;
+        }
+
+        .quantity-input:invalid {
+          color: #ef4444;
+        }
+        
+        .stock-info {
+          font-size: 12px;
+          color: #8898aa;
+          margin-top: 8px;
+        }
+        
+        .stock-warning {
+          color: #f59e0b;
+        }
+        
+        .stock-out {
+          color: #ef4444;
+        }
+
+        .max-warning {
+          color: #ef4444;
+          font-size: 12px;
+          margin-top: 4px;
+          animation: fadeInOut 2s ease-in-out;
+        }
+
+        @keyframes fadeInOut {
+          0% { opacity: 0; transform: translateY(-5px); }
+          20% { opacity: 1; transform: translateY(0); }
+          80% { opacity: 1; transform: translateY(0); }
+          100% { opacity: 0; transform: translateY(-5px); }
+        }
+      `}</style>
+      
+      <div className="quantity-container">
+        <label className="quantity-label">Quantity</label>
+        <div className="quantity-controls">
+          <button
+            type="button"
+            className="quantity-btn decrease"
+            onClick={decreaseQuantity}
+            disabled={quantity <= minQuantity}
+          >
+            −
+          </button>
+          <input
+            type="number"
+            className="quantity-input"
+            min={minQuantity}
+            max={actualMaxQuantity}
+            value={quantity}
+            onChange={handleQuantityChange}
+            onBlur={handleInputBlur}
+            onKeyDown={handleKeyDown}
+          />
+          <button
+            type="button"
+            className="quantity-btn increase"
+            onClick={increaseQuantity}
+            disabled={quantity >= actualMaxQuantity}
+          >
+            +
+          </button>
+        </div>
+        
+        {showMaxWarning && (
+          <div className="max-warning">
+            Maximum quantity is {actualMaxQuantity}
+          </div>
+        )}
+        
+        {/* Only show stock info if stock management is enabled (stock is defined) */}
+        {product.type === 'physical' && product.physical?.stock !== undefined && (
+          <div className={`stock-info ${
+            product.physical.stock === 0 ? 'stock-out' : 
+            product.physical.stock < 10 ? 'stock-warning' : ''
+          }`}>
+            {product.physical.stock === 0 ? 'Out of stock' :
+             product.physical.stock < 10 ? `Only ${product.physical.stock} left in stock` :
+             `${product.physical.stock} available`}
+          </div>
+        )}
+      </div>
+    </>
+  );
+};
+
+export default QuantitySelector;
+
+VariantSelector.tsx
+// productcomponents/VariantSelector.tsx
+'use client';
+
+import { useState, useEffect } from 'react';
+import { IVariant, IVariantSelection } from '../productlib/types';
+
+interface VariantSelectorProps {
+  variants: IVariant[];
+  onVariantSelect: (selections: IVariantSelection[]) => void;
+  selectedQuantity?: number;
+}
+
+const VariantSelector: React.FC<VariantSelectorProps> = ({ 
+  variants, 
+  onVariantSelect, 
+  selectedQuantity = 1 
+}) => {
+  const [selections, setSelections] = useState<IVariantSelection[]>([]);
+  
+  // Initialize with empty selections
+  useEffect(() => {
+    if (variants && variants.length > 0) {
+      // Create initial selections with empty values
+      const initialSelections = variants.map(variant => ({
+        name: variant.name,
+        value: '',
+      }));
+      setSelections(initialSelections);
+    }
+  }, [variants]);
+  
+  // Update parent component when selections change
+  useEffect(() => {
+    if (selections.length > 0) {
+      onVariantSelect(selections);
+    }
+  }, [selections, onVariantSelect]);
+  
+  if (!variants || variants.length === 0) {
+    return null;
+  }
+  
+  const handleVariantChange = (variantName: string, value: string) => {
+    const newSelections = selections.map(selection => 
+      selection.name === variantName 
+        ? { ...selection, value } 
+        : selection
+    );
+    setSelections(newSelections);
+  };
+
+  // Check if a variant value is available based on stock
+  const isVariantValueAvailable = (variant: IVariant, value: string): { 
+    available: boolean; 
+    stockInfo: string; 
+    stockClass: string;
+  } => {
+    // If variant.stock is undefined, it means stock management is not enabled for this variant
+    // In this case, all values are available (unlimited stock)
+    if (variant.stock === undefined) {
+      return {
+        available: true,
+        stockInfo: '',
+        statusClass: ''
+      };
+    }
+
+    // If variant.stock is defined, stock management is enabled
+    // Check if there's enough stock for the selected quantity
+    if (variant.stock === 0) {
+      return {
+        available: false,
+        stockInfo: 'Out of stock',
+        stockClass: 'stock-out'
+      };
+    } else if (variant.stock < selectedQuantity) {
+      return {
+        available: false,
+        stockInfo: `Only ${variant.stock} available`,
+        stockClass: 'stock-low'
+      };
+    } else if (variant.stock < 10) {
+      return {
+        available: true,
+        stockInfo: `${variant.stock} left`,
+        stockClass: 'stock-low'
+      };
+    } else {
+      return {
+        available: true,
+        stockInfo: `${variant.stock} in stock`,
+        stockClass: 'stock-good'
+      };
+    }
+  };
+
+  // Get stock status for a variant
+  const getVariantStockStatus = (variant: IVariant): {
+    available: number;
+    statusText: string;
+    statusClass: string;
+  } => {
+    // If variant.stock is undefined, stock management is not enabled (unlimited stock)
+    if (variant.stock === undefined) {
+      return {
+        available: 999,
+        statusText: '',
+        statusClass: ''
+      };
+    }
+
+    const stock = variant.stock;
+    
+    if (stock === 0) {
+      return {
+        available: 0,
+        statusText: 'Out of stock',
+        statusClass: 'stock-out'
+      };
+    } else if (stock < 5) {
+      return {
+        available: stock,
+        statusText: `Only ${stock} left`,
+        statusClass: 'stock-low'
+      };
+    } else {
+      return {
+        available: stock,
+        statusText: `${stock} in stock`,
+        statusClass: 'stock-good'
+      };
+    }
+  };
+  
+  return (
+    <>
+      <style jsx>{`
+        .variants-container {
+          margin-bottom: 20px;
+        }
+        
+        .variants-title {
+          font-size: 14px;
+          font-weight: 600;
+          color: #32325d;
+          margin-bottom: 16px;
+        }
+        
+        .variant-group {
+          margin-bottom: 20px;
+        }
+        
+        .variant-group:last-child {
+          margin-bottom: 0;
+        }
+        
+        .variant-label {
+          display: block;
+          font-size: 13px;
+          font-weight: 500;
+          color: #6b7c93;
+          margin-bottom: 8px;
+        }
+        
+        .variant-option {
+          display: flex;
+          align-items: center;
+          padding: 12px 16px;
+          border: 1px solid #e6ebf1;
+          border-radius: 6px;
+          margin-bottom: 8px;
+          cursor: pointer;
+          transition: all 0.15s ease;
+          background: white;
+        }
+
+        .variant-option:hover:not(.disabled) {
+          border-color: #635bff;
+          background: #f7f9fc;
+        }
+
+        .variant-option.selected {
+          border-color: #635bff;
+          background: #f7f9fc;
+          box-shadow: 0 0 0 2px rgba(99, 91, 255, 0.2);
+        }
+
+        .variant-option.disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+          background: #f5f5f5;
+        }
+
+        .variant-radio {
+          width: 16px;
+          height: 16px;
+          border: 2px solid #cfd7df;
+          border-radius: 50%;
+          margin-right: 12px;
+          position: relative;
+          flex-shrink: 0;
+        }
+
+        .variant-radio.checked {
+          border-color: #635bff;
+        }
+
+        .variant-radio.checked::after {
+          content: '';
+          width: 8px;
+          height: 8px;
+          background: #635bff;
+          border-radius: 50%;
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+        }
+
+        .variant-info {
+          flex: 1;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+
+        .variant-name {
+          font-size: 14px;
+          font-weight: 500;
+          color: #32325d;
+        }
+
+        .variant-stock {
+          font-size: 12px;
+          color: #8898aa;
+        }
+
+        .variant-stock.stock-good {
+          color: #16a34a;
+        }
+
+        .variant-stock.stock-low {
+          color: #f59e0b;
+        }
+
+        .variant-stock.stock-out {
+          color: #ef4444;
+        }
+
+        .variant-group-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 8px;
+        }
+
+        .variant-name-header {
+          font-size: 13px;
+          font-weight: 500;
+          color: #6b7c93;
+        }
+
+        .variant-stock-summary {
+          font-size: 12px;
+          color: #8898aa;
+        }
+
+        .insufficient-stock-warning {
+          background: #fef2f2;
+          border: 1px solid #fecaca;
+          border-radius: 4px;
+          padding: 8px 12px;
+          margin-top: 8px;
+          font-size: 12px;
+          color: #dc2626;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+      `}</style>
+      
+      <div className="variants-container">
+        <div className="variants-title">Product Options</div>
+        {variants.map((variant, index) => {
+          const currentSelection = selections.find(s => s.name === variant.name);
+          const stockStatus = getVariantStockStatus(variant);
+          const isOutOfStock = stockStatus.available === 0;
+          const hasInsufficientStock = stockStatus.available > 0 && stockStatus.available < selectedQuantity && variant.stock !== undefined;
+          
+          return (
+            <div key={index} className="variant-group">
+              <div className="variant-group-header">
+                <div className="variant-name-header">{variant.name}</div>
+                {stockStatus.statusText && (
+                  <div className="variant-stock-summary">
+                    {stockStatus.statusText}
+                  </div>
+                )}
+              </div>
+              
+              {variant.values.map((value, valueIndex) => {
+                const { available, stockInfo, stockClass } = isVariantValueAvailable(variant, value);
+                const isSelected = currentSelection?.value === value;
+                
+                return (
+                  <div
+                    key={valueIndex}
+                    className={`variant-option ${isSelected ? 'selected' : ''} ${!available ? 'disabled' : ''}`}
+                    onClick={() => available && handleVariantChange(variant.name, value)}
+                  >
+                    <div className={`variant-radio ${isSelected ? 'checked' : ''}`}></div>
+                    <div className="variant-info">
+                      <div className="variant-name">{value}</div>
+                      {stockInfo && (
+                        <div className={`variant-stock ${stockClass}`}>
+                          {stockInfo}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Insufficient stock warning */}
+              {hasInsufficientStock && currentSelection?.value && (
+                <div className="insufficient-stock-warning">
+                  <i className="fas fa-exclamation-triangle"></i>
+                  <span>
+                    Only {stockStatus.available} available, but you've selected {selectedQuantity}. 
+                    Please reduce quantity or choose a different option.
+                  </span>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+};
+
+export default VariantSelector;
+
+
+

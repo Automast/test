@@ -24,6 +24,7 @@ const QuantitySelector: React.FC<QuantitySelectorProps> = ({
   // Determine actual max quantity based on stock if applicable
   let actualMaxQuantity = maxQuantity;
   
+  // Only check stock if stock management is enabled (stock is defined)
   if (product.type === 'physical' && product.physical?.stock !== undefined) {
     actualMaxQuantity = Math.min(maxQuantity, product.physical.stock);
   }
@@ -236,6 +237,7 @@ const QuantitySelector: React.FC<QuantitySelectorProps> = ({
           </div>
         )}
         
+        {/* Only show stock info if stock management is enabled (stock is defined) */}
         {product.type === 'physical' && product.physical?.stock !== undefined && (
           <div className={`stock-info ${
             product.physical.stock === 0 ? 'stock-out' : 

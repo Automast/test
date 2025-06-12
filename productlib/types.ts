@@ -7,6 +7,8 @@ export interface IImage {
   export interface IShippingMethod {
     name: string;
     price: number; // 0 means free shipping
+    minDays: number;
+    maxDays: number;
   }
   
   export interface IVariant {
@@ -63,6 +65,7 @@ export interface IImage {
     variants?: IVariant[];
     images: IImage[];
     status?: 'active' | 'deactivated' | 'deleted';
+    quantityEnabled?: boolean; // New field to enable/disable quantity selection
     // Add these new fields for local currency handling
     localPrice?: number;
     localCurrency?: string;

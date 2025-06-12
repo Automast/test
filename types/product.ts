@@ -11,8 +11,9 @@ export type Product = {
   currency?: string;
   defaultCurrency?: string;
   type: 'physical' | 'digital';
-  status: 'active' | 'inactive' | 'deactivated' | 'draft';
-  sku?: string;
+status: 'active' | 'inactive' | 'deactivated' | 'draft';
+quantityEnabled?: boolean; // New field
+sku?: string;
   barcode?: string;
   autoLocalPrice?: boolean;
   images?: Array<{

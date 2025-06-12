@@ -110,7 +110,7 @@ function askQuestion(query) {
     }
 
     // Write out merged.txt
-    const outPath = path.join(baseDir, 'merged.txt');
+    const outPath = path.join(baseDir, 'productlib folder.txt');
     await fs.writeFile(outPath, merged, 'utf8');
     console.log(`✅ Merged ${files.length} files into ${outPath}`);
   } catch (err) {

@@ -1,13 +1,15 @@
 // productcomponents/ProductDisplay.tsx
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { IProduct, IVariantSelection, IBillingInfo, ITransactionItem } from '../productlib/types';
 import { formatPrice, getUserCurrency, convertPrice, isPixSupported } from '../productlib/currency';
-import { isProductInStock, calculateTotalPrice, generateTransactionId as generateFrontendTxId } from '../productlib/utils';
+import { isProductInStock, calculateShippingFee, generateTransactionId as generateFrontendTxId } from '../productlib/utils';
 import { createTransaction, getIPAddress, getDeviceInfo } from '../productlib/api';
+import { calculateVATAmount, getTaxInfo } from '../productlib/tax';
 import PaymentForm from './PaymentForm';
+import CheckoutSummary from './CheckoutSummary';
 
 interface ProductWithLocalCurrency extends IProduct {
   localPrice?: number;
@@ -29,7 +31,14 @@ const ProductDisplay: React.FC<ProductDisplayProps> = ({ product: initialProduct
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [transactionId, setTransactionId] = useState<string>('');
-  const [showProductDetails, setShowProductDetails] = useState(false);
+
+  const [selectedCountry, setSelectedCountry] = useState<string>('');
+  const [selectedState, setSelectedState] = useState<string>('');
+  const [currentVAT, setCurrentVAT] = useState<number>(0);
+  const [taxInfo, setTaxInfo] = useState<{ rate: number; type: string; currency: string }>({ rate: 0, type: 'none', currency: 'USD' });
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const [showMobileSummary, setShowMobileSummary] = useState(false);
+  const [showQuantityModal, setShowQuantityModal] = useState(false);
 
   useEffect(() => {
     // Generate transaction ID early
@@ -77,169 +86,245 @@ const ProductDisplay: React.FC<ProductDisplayProps> = ({ product: initialProduct
     }
   }, [initialProduct]);
 
+  // Fixed VAT calculation with debouncing and stable references
+  useEffect(() => {
+    const updateVAT = async () => {
+      if (!selectedCountry) {
+        setCurrentVAT(0);
+        setTaxInfo({ rate: 0, type: 'none', currency: 'USD' });
+        return;
+      }
+
+      try {
+        console.log(`[ProductDisplay] Calculating VAT for country: ${selectedCountry}, state: ${selectedState}`);
+        
+        // Get the actual price to calculate VAT on (including conversion)
+        const priceForVAT = product.localPrice || initialProduct.price;
+        const subtotal = priceForVAT * quantity;
+        
+        // Calculate VAT - always enabled now
+        const vatAmount = await calculateVATAmount(subtotal, selectedCountry, selectedState);
+        console.log(`[ProductDisplay] VAT calculated: ${vatAmount} for subtotal: ${subtotal}`);
+        setCurrentVAT(vatAmount);
+
+        // Get tax info for display
+        const info = await getTaxInfo(selectedCountry, selectedState);
+        console.log(`[ProductDisplay] Tax info:`, info);
+        setTaxInfo(info);
+      } catch (error) {
+        console.error('Error updating VAT:', error);
+        setCurrentVAT(0);
+        setTaxInfo({ rate: 0, type: 'none', currency: 'USD' });
+      }
+    };
+
+    // Debounce the VAT calculation to prevent rapid recalculation
+    const timeoutId = setTimeout(updateVAT, 200);
+    return () => clearTimeout(timeoutId);
+  }, [selectedCountry, selectedState, quantity, product.localPrice, initialProduct.price]);
+
   const paymentDetails = useMemo(() => {
-    // Calculate total in the original product's default currency first
-    const originalPrices = calculateTotalPrice(
-      initialProduct, // Always use initialProduct for base calculation
-      quantity,
-      selectedShipping
-    );
+    // Get the display price and currency
+    const displayPrice = product.localPrice ?? initialProduct.price;
+    const displayCurrency = product.localCurrency || initialProduct.defaultCurrency;
+    
+    // Calculate components
+    const subtotal = displayPrice * quantity;
+    const shipping = calculateShippingFee(initialProduct, selectedShipping);
+    const vat = currentVAT;
+    const total = subtotal + vat + shipping;
 
-    // Determine the currency to be used for display and payment
-    const displayCurrencyCode = product.localCurrency || initialProduct.defaultCurrency;
-    let finalTotalMainUnit = originalPrices.total;
-    let finalCurrencyCode = initialProduct.defaultCurrency;
-
-    // Check if conversion to a local currency is applicable and desired
-    if (
-      displayCurrencyCode !== initialProduct.defaultCurrency &&
-      product.localPrice !== undefined && // This is the converted unit price
-      product.localCurrency === displayCurrencyCode && // Ensure product's localCurrency is set and matches display
-      initialProduct.autoLocalPrice // Check if auto conversion is enabled
-    ) {
-      // Calculate conversion rate based on the single item's converted price
-      const conversionRate = product.localPrice / initialProduct.price;
-      
-      // Apply conversion to all components of the price
-      const convertedSubtotal = originalPrices.subtotal * conversionRate;
-      const convertedVat = originalPrices.vat * conversionRate;
-      const convertedShipping = originalPrices.shipping * conversionRate;
-      
-      finalTotalMainUnit = parseFloat((convertedSubtotal + convertedVat + convertedShipping).toFixed(2));
-      finalCurrencyCode = displayCurrencyCode;
-    } else {
-      // If no conversion, use the total calculated in the product's default currency
-      finalTotalMainUnit = originalPrices.total;
-      finalCurrencyCode = initialProduct.defaultCurrency;
-    }
+    console.log(`[ProductDisplay] Payment details - Subtotal: ${subtotal}, VAT: ${vat}, Shipping: ${shipping}, Total: ${total}`);
 
     // Amount for Stripe must be in the smallest currency unit (e.g., cents, pence)
-    const finalTotalSmallestUnit = Math.round(finalTotalMainUnit * 100);
+    const totalSmallestUnit = Math.round(total * 100);
 
     return {
-      amount: finalTotalSmallestUnit,
-      currency: finalCurrencyCode,
-      prices: originalPrices,
-      conversionRate: product.localPrice ? product.localPrice / initialProduct.price : 1,
+      amount: totalSmallestUnit,
+      currency: displayCurrency,
+      subtotal,
+      vat,
+      shipping,
+      total,
+      displayPrice,
+      displayCurrency
     };
-  }, [product, initialProduct, quantity, selectedShipping]);
+  }, [product, initialProduct, quantity, selectedShipping, currentVAT]);
 
-  const canPurchase = isProductInStock(product, variantSelections);
-
-  const handleSubmit = async (
-    billingInfo: IBillingInfo,
-    paymentMethod: 'card' | 'pix' | 'paypal' | 'wallet' | 'other',
-    statusFromStripe: 'pending' | 'successful' | 'canceled',
-    paymentIntentIdFromStripe?: string
-  ) => {
-    if (!transactionId) {
-      console.error("[ProductDisplay] handleSubmit: transactionId is missing.");
-      setErrorMessage("A transaction ID is missing. Please refresh and try again.");
-      setIsSubmitting(false);
-      return;
+  // Check if product can be purchased (stock availability)
+  const canPurchase = useMemo(() => {
+    // Check if all required variants are selected
+    if (initialProduct.variants && initialProduct.variants.length > 0) {
+      const allVariantsSelected = variantSelections.every(selection => selection.value);
+      if (!allVariantsSelected) {
+        return false;
+      }
     }
-    
-    console.log(`[ProductDisplay] handleSubmit. PaymentProvider Status: ${statusFromStripe}, PI_ID: ${paymentIntentIdFromStripe}, App TxID: ${transactionId}, Qty: ${quantity}`);
-    
-    setIsSubmitting(true);
-    setErrorMessage('');
-      
-    try {
-      const { deviceInfo, browserInfo } = getDeviceInfo();
-      const ipAddress = await getIPAddress();
-      
-      const originalPrices = calculateTotalPrice(
-        initialProduct,
-        quantity,
-        selectedShipping
-      );
 
-      let txUnitPrice = initialProduct.price;
-      let txSaleCurrency = initialProduct.defaultCurrency;
-      let lineItemSubtotalWithoutVat = originalPrices.subtotal; // This is unitPrice * quantity in default currency
-      let lineItemVat = originalPrices.vat; // VAT on that subtotal
+    return isProductInStock(initialProduct, variantSelections, quantity);
+  }, [initialProduct, variantSelections, quantity]);
 
-      const useLocalForTx = product.localCurrency &&
-        product.localCurrency !== initialProduct.defaultCurrency &&
-        initialProduct.autoLocalPrice &&
-        product.localPrice !== undefined;
+  // Get maximum available quantity
+  const maxQuantity = useMemo(() => {
+    if (initialProduct.type === 'digital') {
+      return 999; // Digital products have no quantity limit
+    }
 
-      if (useLocalForTx && product.localPrice) {
-        const conversionRate = product.localPrice / initialProduct.price;
-        txUnitPrice = product.localPrice;
-        txSaleCurrency = product.localCurrency!;
-        lineItemSubtotalWithoutVat = parseFloat((originalPrices.subtotal * conversionRate).toFixed(2));
-        lineItemVat = parseFloat((originalPrices.vat * conversionRate).toFixed(2));
+    if (initialProduct.type === 'physical') {
+      // Check if stock management is enabled
+      let hasStockManagement = false;
+      let minStock = 999;
+
+      // If variants exist, check variant stock management
+      if (initialProduct.variants && initialProduct.variants.length > 0) {
+        const allVariantsSelected = variantSelections.every(selection => selection.value);
+        if (!allVariantsSelected) {
+          return 1;
+        }
+
+        // Check if any variant has stock management enabled
+        for (const variant of initialProduct.variants) {
+          const selection = variantSelections.find(s => s.name === variant.name);
+          if (selection && variant.stock !== undefined) {
+            hasStockManagement = true;
+            minStock = Math.min(minStock, variant.stock);
+          }
+        }
+      } else {
+        // No variants - check product stock management
+        if (initialProduct.physical?.stock !== undefined) {
+          hasStockManagement = true;
+          minStock = initialProduct.physical.stock;
+        }
       }
-      
-      // Grand total calculations (for the top-level transaction document)
-      let txGrandSubtotal = lineItemSubtotalWithoutVat; // For a single product line, this is the same
-      let txGrandVat = lineItemVat;
-      let txGrandShipping = originalPrices.shipping; // Assuming shipping is for the whole order
-      
-      if (useLocalForTx && product.localPrice) {
-         const conversionRate = product.localPrice / initialProduct.price;
-         txGrandShipping = parseFloat((originalPrices.shipping * conversionRate).toFixed(2));
+
+      // If no stock management is enabled, return unlimited (999)
+      if (!hasStockManagement) {
+        return 999;
       }
-      let txGrandTotal = parseFloat((txGrandSubtotal + txGrandVat + txGrandShipping).toFixed(2));
 
-      // Prepare items array in the format expected by backend
-      const items: ITransactionItem[] = [{ // Ensure ITransactionItem matches the modified type
-        productId: initialProduct._id,
-        productSlug: initialProduct.slug,
-        productName: initialProduct.title,
-        productType: initialProduct.type,
-        productOwnerId: initialProduct.merchantId || '',
-        quantity: quantity,
-        unitPrice: txUnitPrice, // Unit price in the sale currency
-        totalPrice: lineItemSubtotalWithoutVat, // Total for this line item (unitPrice * quantity) in sale currency
-        currency: txSaleCurrency, // Currency for this line item
-        vatEnabled: initialProduct.vatEnabled,
-        vatAmount: lineItemVat, // VAT for this line item
-        variants: variantSelections.length > 0 ? variantSelections : undefined,
-      }];
+      return Math.max(0, minStock);
+    }
 
-      const transactionData = {
-        items,
-        saleCurrency: txSaleCurrency, // Overall sale currency
-        total: txGrandTotal,         // Overall total for the transaction
-        subtotal: txGrandSubtotal,   // Overall subtotal for the transaction
-        shippingFee: txGrandShipping,  // Overall shipping
-        paymentMethod,
-        buyerEmail: billingInfo.email,
-        buyerPhone: billingInfo.phone || '',
-        billingName: billingInfo.name,
-        billingAddress: billingInfo.address,
-        billingCity: billingInfo.city,
-        billingState: billingInfo.state,
-        billingPostalCode: billingInfo.postalCode,
-        billingCountry: billingInfo.country,
-        ipAddress: ipAddress || '127.0.0.1',
-        deviceInfo: deviceInfo || 'Unknown Device',
-        browserInfo: browserInfo || 'Unknown Browser',
-        status: statusFromStripe,
-        
-        ...(paymentMethod === 'card' && {
-          useStripe: true,
-          paymentIntentId: paymentIntentIdFromStripe,
+    return 999;
+  }, [initialProduct, variantSelections]);
+
+const handleSubmit = async (
+  billingInfo: IBillingInfo,
+  paymentMethod: 'card' | 'pix' | 'paypal' | 'wallet' | 'other',
+  statusFromStripe: 'pending' | 'successful' | 'canceled',
+  paymentIntentIdFromStripe?: string
+) => {
+  if (!transactionId) {
+    console.error("[ProductDisplay] handleSubmit: transactionId is missing.");
+    setErrorMessage("A transaction ID is missing. Please refresh and try again.");
+    setIsSubmitting(false);
+    return;
+  }
+  
+  console.log(`[ProductDisplay] handleSubmit. PaymentProvider Status: ${statusFromStripe}, PI_ID: ${paymentIntentIdFromStripe}, App TxID: ${transactionId}, Qty: ${quantity}`);
+  
+  setIsSubmitting(true);
+  setErrorMessage('');
+    
+  try {
+    const { deviceInfo, browserInfo } = getDeviceInfo();
+    const ipAddress = await getIPAddress();
+    
+    // Use the calculated payment details which include VAT
+    const { subtotal, vat, shipping, total, displayCurrency } = paymentDetails;
+
+    // IMPORTANT: Backend should receive pre-tax total, but payment processor charges full amount
+    const backendTotal = subtotal + shipping; // Exclude VAT from backend total
+    const chargedTotal = total; // Full amount charged by payment processor
+
+    console.log(`[ProductDisplay] Payment breakdown - Charged: ${chargedTotal}, Backend Total: ${backendTotal}, VAT: ${vat}`);
+
+    // Prepare items array in the format expected by backend
+    const items: ITransactionItem[] = [{
+      productId: initialProduct._id,
+      productSlug: initialProduct.slug,
+      productName: initialProduct.title,
+      productType: initialProduct.type,
+      productOwnerId: initialProduct.merchantId || '',
+      quantity: quantity,
+      unitPrice: product.localPrice || initialProduct.price,
+      totalPrice: subtotal, // This is unitPrice * quantity (pre-tax)
+      currency: displayCurrency,
+      vatEnabled: true, // Always enabled now
+      vatAmount: 0, // Don't include VAT in line item, it goes to metadata
+      variants: variantSelections.length > 0 ? variantSelections : undefined,
+    }];
+
+    const transactionData = {
+      items,
+      saleCurrency: displayCurrency,
+      total: backendTotal, // Backend gets pre-tax total
+      subtotal: subtotal,
+      shippingFee: shipping,
+      paymentMethod,
+      buyerEmail: billingInfo.email,
+      buyerPhone: billingInfo.phone || '',
+      billingName: billingInfo.name,
+      billingAddress: billingInfo.address,
+      billingCity: billingInfo.city,
+      billingState: billingInfo.state,
+      billingPostalCode: billingInfo.postalCode,
+      billingCountry: billingInfo.country,
+      ipAddress: ipAddress || '127.0.0.1',
+      deviceInfo: deviceInfo || 'Unknown Device',
+      browserInfo: browserInfo || 'Unknown Browser',
+      status: statusFromStripe,
+      
+      ...(paymentMethod === 'card' && {
+        useStripe: true,
+        paymentIntentId: paymentIntentIdFromStripe,
+      }),
+      
+      metadata: {
+        transactionId: transactionId,
+        client_quantity: quantity,
+        client_selectedShipping: selectedShipping,
+        client_variantSelections: variantSelections,
+        client_localCurrencyAttempt: localCurrency,
+        stripe_charged_amount_smallest_unit: paymentDetails.amount, // Full amount charged
+        stripe_charged_currency: paymentDetails.currency,
+        stripe_charged_total_display: chargedTotal, // Full amount including VAT
+        vat: vat, // VAT amount charged but not included in backend total
+        vat_amount: vat, // Duplicate for backward compatibility
+        vat_rate: taxInfo.rate,
+        vat_country: selectedCountry,
+        vat_state: selectedState,
+        vat_type: taxInfo.type,
+        backend_total_excluding_vat: backendTotal,
+        initial_product_price: initialProduct.price,
+        initial_product_currency: initialProduct.defaultCurrency,
+        auto_local_price_setting: initialProduct.autoLocalPrice,
+        converted_unit_local_price: product.localPrice,
+        converted_local_currency: product.localCurrency,
+        productSource: initialProduct.productSource || 'hosted',
+        // Additional metadata for better transaction tracking
+        product_sku: initialProduct.sku,
+        product_barcode: initialProduct.barcode,
+        product_type: initialProduct.type,
+        quantity_enabled: initialProduct.quantityEnabled,
+        // Digital product specific metadata
+        ...(initialProduct.type === 'digital' && initialProduct.digital?.recurring && {
+          subscription_interval: initialProduct.digital.recurring.interval,
+          subscription_has_trial: initialProduct.digital.recurring.hasTrial,
+          subscription_trial_days: initialProduct.digital.recurring.trialDays,
         }),
-        
-        metadata: {
-          transactionId: transactionId, // The TX_... ID
-          client_quantity: quantity,
-          client_selectedShipping: selectedShipping,
-          client_variantSelections: variantSelections,
-          client_localCurrencyAttempt: localCurrency, // The currency the user saw
-          stripe_charged_amount_smallest_unit: paymentDetails.amount, // Amount sent to Stripe (cents)
-          stripe_charged_currency: paymentDetails.currency, // Currency sent to Stripe
-          initial_product_price: initialProduct.price,
-          initial_product_currency: initialProduct.defaultCurrency,
-          auto_local_price_setting: initialProduct.autoLocalPrice,
-          converted_unit_local_price: product.localPrice,
-          converted_local_currency: product.localCurrency,
-          productSource: initialProduct.productSource || 'hosted',
-        },
-      };
+        // Physical product specific metadata
+        ...(initialProduct.type === 'physical' && {
+          shipping_method: selectedShipping,
+          has_variants: (initialProduct.variants?.length || 0) > 0,
+          selected_variants: variantSelections,
+          stock_managed: initialProduct.physical?.stock !== undefined,
+          product_weight: initialProduct.physical?.weight,
+          product_dimensions: initialProduct.physical?.dimensions,
+        }),
+      },
+    };
       
       console.log('[ProductDisplay] Creating/Updating transaction with data for backend:', JSON.stringify(transactionData, null, 2));
       const response = await createTransaction(transactionData);
@@ -275,8 +360,27 @@ const ProductDisplay: React.FC<ProductDisplayProps> = ({ product: initialProduct
   };
 
   const handleQuantityChange = (newQuantity: number) => {
-    setQuantity(newQuantity);
+    const maxQty = maxQuantity;
+    const finalQuantity = Math.min(Math.max(1, newQuantity), maxQty);
+    setQuantity(finalQuantity);
   };
+
+  // Fixed handlers with useCallback to prevent unnecessary re-renders
+  const handleCountryChange = useCallback((countryCode: string) => {
+    console.log(`[ProductDisplay] Country changed to: ${countryCode}`);
+    setSelectedCountry(prevCountry => {
+      if (prevCountry !== countryCode) {
+        setSelectedState(''); // Reset state when country changes
+        return countryCode;
+      }
+      return prevCountry;
+    });
+  }, []);
+
+  const handleStateChange = useCallback((stateCode: string) => {
+    console.log(`[ProductDisplay] State changed to: ${stateCode}`);
+    setSelectedState(prevState => prevState !== stateCode ? stateCode : prevState);
+  }, []);
 
   const formatImageUrl = (url: string): string => {
     // If it's already a full URL, use it as-is
@@ -304,27 +408,96 @@ const ProductDisplay: React.FC<ProductDisplayProps> = ({ product: initialProduct
     return mainImage ? formatImageUrl(mainImage.url) : '';
   };
 
-  const getConvertedPrices = () => {
-    const originalPrices = calculateTotalPrice(initialProduct, quantity, selectedShipping);
-    
-    if (product.localPrice && product.localCurrency && product.localCurrency !== initialProduct.defaultCurrency) {
-      const conversionRate = product.localPrice / initialProduct.price;
-      return {
-        subtotal: parseFloat((originalPrices.subtotal * conversionRate).toFixed(2)),
-        vat: parseFloat((originalPrices.vat * conversionRate).toFixed(2)),
-        shipping: parseFloat((originalPrices.shipping * conversionRate).toFixed(2)),
-        total: parseFloat(((originalPrices.subtotal + originalPrices.vat + originalPrices.shipping) * conversionRate).toFixed(2)),
-        currency: product.localCurrency,
-      };
+  // Get available stock text
+  const getStockText = (): string => {
+    if (initialProduct.type === 'digital') {
+      return '';
     }
-    
-    return {
-      ...originalPrices,
-      currency: initialProduct.defaultCurrency,
-    };
+
+    // Check if stock management is enabled
+    let hasStockManagement = false;
+    let stock = 0;
+
+    // If variants exist
+    if (initialProduct.variants && initialProduct.variants.length > 0) {
+      const allVariantsSelected = variantSelections.every(selection => selection.value);
+      if (!allVariantsSelected) {
+        return 'Select all options to see availability';
+      }
+
+      // Check if any selected variant has stock management
+      let minStock = 999;
+      for (const variant of initialProduct.variants) {
+        const selection = variantSelections.find(s => s.name === variant.name);
+        if (selection && variant.stock !== undefined) {
+          hasStockManagement = true;
+          minStock = Math.min(minStock, variant.stock);
+        }
+      }
+      stock = minStock;
+    } else {
+      // No variants - check product stock
+      if (initialProduct.physical?.stock !== undefined) {
+        hasStockManagement = true;
+        stock = initialProduct.physical.stock;
+      }
+    }
+
+    // If no stock management is enabled, it means unlimited stock
+    if (!hasStockManagement) {
+      return ''; // Don't show any stock info for unlimited stock
+    }
+
+    if (stock === 0) {
+      return 'Out of stock';
+    } else if (stock < 10) {
+      return `Only ${stock} left in stock`;
+    } else {
+      return `${stock} available`;
+    }
   };
 
-  if (isLoading || !transactionId) {
+  // Format recurring subscription text
+  const getRecurringText = (): string => {
+    if (initialProduct.type !== 'digital' || !initialProduct.digital?.recurring) {
+      return '';
+    }
+
+    const { interval } = initialProduct.digital.recurring;
+    
+    let intervalText = '';
+    if (interval === 'monthly') {
+      intervalText = '/month';
+    } else if (interval === 'yearly') {
+      intervalText = '/year';
+    }
+
+    return intervalText;
+  };
+
+  // Get trial text
+  const getTrialText = (): string => {
+    if (initialProduct.type !== 'digital' || !initialProduct.digital?.recurring?.hasTrial) {
+      return '';
+    }
+
+    const trialDays = initialProduct.digital.recurring.trialDays || 0;
+    if (trialDays > 0) {
+      return `${trialDays}-day free trial`;
+    } else {
+      return 'Free trial';
+    }
+  };
+
+  const openQuantityModal = () => {
+    setShowQuantityModal(true);
+  };
+
+  const closeQuantityModal = () => {
+    setShowQuantityModal(false);
+  };
+
+if (isLoading || !transactionId) {
     return (
       <div style={{
         minHeight: '100vh',
@@ -344,23 +517,59 @@ const ProductDisplay: React.FC<ProductDisplayProps> = ({ product: initialProduct
           width: '100%',
         }}>
           <div style={{
-            width: '32px',
-            height: '32px',
-            border: '3px solid #635bff',
-            borderTop: '3px solid transparent',
-            borderRadius: '50%',
-            animation: 'spin 1s linear infinite',
-            margin: '0 auto 20px',
-          }} />
-          <div style={{ color: '#32325d', fontSize: '16px' }}>Loading product...</div>
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            margin: '0 auto 20px'
+          }}>
+            <div style={{
+              width: '12px',
+              height: '12px',
+              background: '#635bff',
+              borderRadius: '50%',
+              animation: 'bounce 1.4s ease-in-out infinite both',
+              margin: '0 2px'
+            }}></div>
+            <div style={{
+              width: '12px',
+              height: '12px',
+              background: '#635bff',
+              borderRadius: '50%',
+              animation: 'bounce 1.4s ease-in-out infinite both',
+              animationDelay: '-0.32s',
+              margin: '0 2px'
+            }}></div>
+            <div style={{
+              width: '12px',
+              height: '12px',
+              background: '#635bff',
+              borderRadius: '50%',
+              animation: 'bounce 1.4s ease-in-out infinite both',
+              animationDelay: '-0.16s',
+              margin: '0 2px'
+            }}></div>
+          </div>
+          <style jsx>{`
+            @keyframes bounce {
+              0%, 80%, 100% { 
+                transform: scale(0);
+                opacity: 0.5;
+              } 
+              40% { 
+                transform: scale(1);
+                opacity: 1;
+              }
+            }
+          `}</style>
         </div>
       </div>
     );
   }
 
-  const prices = getConvertedPrices();
-  const displayPrice = product.localPrice ?? product.price;
-  const displayCurrency = product.localCurrency || product.defaultCurrency;
+  const { subtotal, vat, shipping, total, displayPrice, displayCurrency } = paymentDetails;
+  const stockText = getStockText();
+  const recurringText = getRecurringText();
+  const trialText = getTrialText();
 
   return (
     <>
@@ -370,569 +579,1274 @@ const ProductDisplay: React.FC<ProductDisplayProps> = ({ product: initialProduct
           100% { transform: rotate(360deg); }
         }
         
-        .checkout-container {
-          min-height: 100vh;
-          background-color: #f6f9fc;
+        @keyframes enterNoScale {
+          0% { opacity: 0; }
+          to { opacity: 1; }
+        }
+
+        @keyframes slideDown {
+          from {
+            transform: translateY(-100%);
+            opacity: 0;
+          }
+          to {
+            transform: translateY(0);
+            opacity: 1;
+          }
+        }
+
+        @keyframes slideUp {
+          from {
+            transform: translateY(100%);
+            opacity: 0;
+          }
+          to {
+            transform: translateY(0);
+            opacity: 1;
+          }
+        }
+
+        .modal-backdrop {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.4);
+          z-index: 1000;
+          display: flex;
+          align-items: flex-end;
+          justify-content: center;
+        }
+
+        .modal-content {
+          background: white;
+          width: 100%;
+          max-width: 500px;
+          border-radius: 12px 12px 0 0;
+          animation: slideUp 0.3s ease-out;
+          max-height: 80vh;
+          overflow-y: auto;
+        }
+
+        @media (min-width: 768px) {
+          .modal-backdrop {
+            align-items: center;
+          }
+          
+          .modal-content {
+            border-radius: 12px;
+            max-height: 600px;
+          }
+        }
+
+        .modal-header {
+          padding: 20px;
+          border-bottom: 1px solid #e6ebf1;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+
+        .modal-title {
+          font-size: 18px;
+          font-weight: 600;
+          color: #32325d;
+        }
+
+        .modal-close {
+          background: none;
+          border: none;
+          font-size: 24px;
+          color: #8898aa;
+          cursor: pointer;
+          padding: 0;
+          width: 32px;
+          height: 32px;
           display: flex;
           align-items: center;
           justify-content: center;
-          padding: 20px;
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+          border-radius: 50%;
+          transition: all 0.2s;
+        }
+
+        .modal-close:hover {
+          background: #f8f9fa;
           color: #32325d;
-          line-height: 1.4;
         }
-        
-        .checkout-wrapper {
-          display: flex;
-          max-width: 920px;
-          width: 100%;
-          background: white;
-          border-radius: 8px;
-          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-          overflow: hidden;
+
+        .modal-body {
+          padding: 24px;
         }
-        
-        .product-section {
-          flex: 1;
-          padding: 40px;
-          background: #fbfcfd;
-          border-right: 1px solid #e6ebf1;
-        }
-        
-        .payment-section {
-          flex: 1;
-          padding: 40px;
-        }
-        
-        .header {
+
+        .quantity-modal-controls {
           display: flex;
           align-items: center;
-          margin-bottom: 40px;
+          justify-content: center;
+          gap: 24px;
+          margin-bottom: 32px;
+        }
+
+        .quantity-modal-btn {
+          width: 48px;
+          height: 48px;
+          border: 1px solid #e6ebf1;
+          border-radius: 6px;
+          background: white;
+          color: #32325d;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 20px;
+          transition: all 0.15s;
+          box-shadow: 0 0 0 1px #e0e0e0, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+        }
+
+        .quantity-modal-btn:hover:not(:disabled) {
+          background: #f8f9fa;
+          box-shadow: 0 0 0 1px #635bff, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+        }
+
+        .quantity-modal-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        .quantity-modal-input {
+          width: 80px;
+          height: 48px;
+          border: 1px solid #e6ebf1;
+          border-radius: 6px;
+          text-align: center;
+          font-size: 20px;
+          font-weight: 600;
+          color: #32325d;
+          box-shadow: 0 0 0 1px #e0e0e0, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+        }
+
+        .quantity-modal-input:focus {
+          outline: none;
+          box-shadow: 0 0 0 1px rgba(50,151,211,0.7), 0 1px 1px 0 rgba(0,0,0,0.07), 0 0 0 4px rgba(50,151,211,0.3);
+        }
+
+        .stock-info-modal {
+          text-align: center;
+          font-size: 14px;
+          margin-bottom: 24px;
+          color: #8898aa;
+        }
+
+        .stock-info-modal.low {
+          color: #f59e0b;
+        }
+
+        .stock-info-modal.out {
+          color: #ef4444;
+        }
+
+        /* Mobile summary dropdown */
+        .mobile-summary-toggle {
+          display: none;
+        }
+
+        @media (max-width: 991.98px) {
+          .mobile-summary-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: #32325d;
+            cursor: pointer;
+            background: none;
+            border: none;
+            padding: 8px 0;
+          }
+
+          .mobile-summary-toggle svg {
+            width: 12px;
+            height: 12px;
+            transition: transform 0.2s;
+          }
+
+          .mobile-summary-toggle.open svg {
+            transform: rotate(180deg);
+          }
+
+          .mobile-summary-dropdown {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            background: white;
+            border-radius: 6px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            width: calc(100vw - 32px);
+            max-width: 380px;
+            margin-top: 8px;
+            animation: slideDown 0.3s ease-out;
+            z-index: 100;
+          }
+
+          .mobile-summary-content {
+            padding: 16px;
+          }
+        }
+
+        /* Main styles following HTML design */
+        * {
+          box-sizing: border-box;
+        }
+        
+        .container {
+          height: 100vh;
+          height: 100dvh;
+          display: flex;
+          justify-content: center;
+          align-items: flex-start;
+          background-color: #f7f7f7;
+        }
+        
+.app {
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          margin-top: 0;
+          width: 100%;
+          padding-top: 16px;
+          animation: enterNoScale 0.6s;
+          position: relative;
+        }
+        
+        .overview {
+          width: 100%;
+          padding: 0 16px 16px;
+        }
+        
+        .overview > * {
+          margin: 0 auto;
+          max-width: 380px;
+        }
+        
+        .payment {
+          background-color: white;
+          padding-top: 24px;
+          transition: background-color 0.4s ease-in-out;
+          z-index: 1;
+          padding: 0 16px 16px;
+          width: 100%;
+        }
+        
+        .payment > * {
+          margin: 0 auto;
+          max-width: 380px;
+        }
+        
+        /* Header */
+        .header {
+          min-height: 28px;
+          z-index: 12;
+          background-color: white;
+        }
+        
+        .header-content {
+          margin: auto;
+          max-width: 380px;
+          display: flex;
+          justify-content: space-between;
+          align-items: stretch;
+          position: relative;
+        }
+        
+        .business {
+          display: flex;
+          align-items: center;
+          max-width: 100%;
+          min-width: 0;
+        }
+        
+        .business > * {
+          flex: 0 1 auto;
+          max-width: 100%;
+          min-width: 0;
+        }
+        
+        .business-image {
+          flex-basis: auto;
+          flex-shrink: 0;
         }
         
         .business-icon {
           width: 28px;
           height: 28px;
-          background: #f6f9fc;
-          border-radius: 50%;
+          border-radius: 100%;
+          box-shadow: 0 2px 5px 0 rgba(50,50,93,0.1), 0 1px 1px 0 rgba(0,0,0,0.07);
+          margin-right: 8px;
+          background: white;
           display: flex;
-          align-items: center;
           justify-content: center;
-          margin-right: 12px;
-          border: 1px solid #e6ebf1;
-          color: #8898aa;
+          align-items: center;
+        }
+        
+        .business-icon svg {
+          fill: hsla(0,0%,10%,0.5);
+          width: 12px;
+          height: 12px;
         }
         
         .business-name {
-          font-size: 16px;
+          color: hsla(0,0%,10%,0.9);
+          font-size: 14px;
           font-weight: 500;
-          color: #32325d;
+          margin: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
         
-        .product-image {
+        /* Product Summary */
+        .product-summary {
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          align-items: center;
+          cursor: default;
+          text-align: center;
+          margin-bottom: 24px;
+        }
+        
+        .product-summary.no-image {
+          margin-bottom: calc(16px + 12.5px);
+        }
+        
+        .product-info {
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          width: 100%;
+        }
+        
+        .product-name {
+          color: hsla(0,0%,10%,0.6);
+          font-size: 16px;
+          font-weight: 600;
+          margin-right: 20px;
+          position: relative;
+          word-break: break-word;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          display: -webkit-box;
+          -webkit-box-orient: vertical;
+          -webkit-line-clamp: 2;
+          max-width: 100%;
+        }
+        
+        .amounts-container {
+          position: relative;
+        }
+        
+        .totals-read {
+          opacity: 1;
+        }
+        
+        .total-amount-container {
+          display: flex;
+          align-items: flex-end;
+          justify-content: center;
+        }
+        
+        .total-amount {
+          font-size: 28px;
+          margin: 0 0 3px;
+          font-weight: 600;
+          color: hsla(0,0%,10%,0.9);
+          font-variant-numeric: tabular-nums;
+          
+        }
+
+        .subscription-interval {
+          font-size: 16px;
+          font-weight: 400;
+          color: hsla(0,0%,10%,0.6);
+          margin-left: 2px;
+        }
+        
+        .amounts-descriptions {
+          transition: all 0.3s ease;
+        }
+        
+        .product-description {
+          color: hsla(0,0%,10%,0.6);
+          font-size: 14px;
+          font-weight: 500;
+          display: block;
+          margin-bottom: 4px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          display: -webkit-box;
+          -webkit-box-orient: vertical;
+          max-width: 100%;
+        }
+
+        /* Product images section */
+        .product-images-section {
+          margin: 16px 0;
+        }
+
+        .product-image-main {
           width: 100%;
           max-width: 200px;
           height: 150px;
           background: #f6f9fc;
           border-radius: 8px;
-          margin: 0 auto 30px;
+          margin: 0 auto 12px;
+          overflow: hidden;
+          border: 1px solid #e6ebf1;
+          cursor: pointer;
+        }
+
+        .product-image-main img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          transition: transform 0.3s ease;
+        }
+
+        .product-image-main:hover img {
+          transform: scale(1.05);
+        }
+
+        .product-image-placeholder {
+          width: 100%;
+          height: 100%;
           display: flex;
+          flex-direction: column;
           align-items: center;
           justify-content: center;
-          overflow: hidden;
+          color: hsla(0,0%,10%,0.5);
+          font-size: 14px;
         }
-        
-        .product-image img {
+
+        .product-image-placeholder svg {
+          width: 32px;
+          height: 32px;
+          margin-bottom: 8px;
+          fill: currentColor;
+          opacity: 0.5;
+        }
+
+        .product-thumbnails {
+          display: flex;
+          gap: 8px;
+          justify-content: center;
+          flex-wrap: wrap;
+        }
+
+        .product-thumbnail {
+          width: 40px;
+          height: 40px;
+          border-radius: 4px;
+          overflow: hidden;
+          border: 2px solid transparent;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          background: #f6f9fc;
+        }
+
+        .product-thumbnail:hover {
+          border-color: #cfd7df;
+        }
+
+        .product-thumbnail.active {
+          border-color: #635bff;
+          box-shadow: 0 0 0 2px rgba(99, 91, 255, 0.2);
+        }
+
+        .product-thumbnail img {
           width: 100%;
           height: 100%;
           object-fit: cover;
         }
-        
-        .product-title {
-          font-size: 18px;
+
+/* Quantity selector */
+.quantity-section {
+  margin: 24px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center; /* This will center the block on all screens */
+  gap: 20px; /* Space between text and button */
+}
+
+.quantity-text-block {
+  text-align: left;
+}
+
+     .quantity-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: hsla(0,0%,10%,0.7);
+  margin-bottom: 4px;
+}
+
+        .quantity-button {
+          background: white;
+          border: 1px solid #e6ebf1;
+          border-radius: 6px;
+          padding: 8px 16px;
+          font-size: 16px;
           font-weight: 500;
-          color: #8898aa;
-          margin-bottom: 8px;
-          text-align: center;
-        }
-        
-        .product-price {
-          font-size: 32px;
-          font-weight: 600;
           color: #32325d;
-          text-align: center;
-          margin-bottom: 8px;
-        }
-        
-        .product-description {
-          font-size: 14px;
-          color: #8898aa;
-          text-align: center;
-          margin-bottom: 20px;
-        }
-        
-        .view-details-btn {
-          background: none;
-          border: none;
-          color: #635bff;
-          font-size: 14px;
-          font-weight: 500;
           cursor: pointer;
+          transition: all 0.15s;
+          box-shadow: 0 0 0 1px #e0e0e0, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
           display: flex;
           align-items: center;
           gap: 8px;
-          margin: 0 auto 20px;
-          padding: 8px 12px;
-          border-radius: 4px;
-          transition: background-color 0.15s;
+          min-width: 90px;
         }
-        
-        .view-details-btn:hover {
-          background: #f7f9fc;
+
+        .quantity-button:hover {
+          box-shadow: 0 0 0 1px #635bff, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
         }
-        
-        .view-details-icon {
-          transition: transform 0.15s;
-          transform: ${showProductDetails ? 'rotate(180deg)' : 'rotate(0deg)'};
+
+        .quantity-button svg {
+          width: 12px;
+          height: 12px;
+          fill: currentColor;
+          margin-left: auto;
         }
-        
-        .product-details {
+
+        .stock-info {
+  font-size: 12px;
+  margin-top: 0; /* Reset margin as layout is now handled by flex */
+  text-align: left;
+  color: hsla(0,0%,10%,0.6);
+}
+
+        .stock-available {
+          color: #16a34a;
+        }
+
+        .stock-warning {
+          color: #f59e0b;
+        }
+
+        .stock-error {
+          color: #ef4444;
+        }
+
+        /* Product meta section */
+        .product-meta {
           background: #f8f9fa;
           border: 1px solid #e6ebf1;
           border-radius: 6px;
-          padding: 20px;
-          margin-top: 20px;
-          display: ${showProductDetails ? 'block' : 'none'};
+          padding: 16px;
+          margin: 16px 0;
+          font-size: 13px;
         }
-        
-        .detail-row {
+
+        .meta-row {
           display: flex;
           justify-content: space-between;
-          align-items: center;
-          margin-bottom: 12px;
-          font-size: 14px;
+          margin-bottom: 8px;
         }
-        
-        .detail-label {
-          color: #8898aa;
+
+        .meta-row:last-child {
+          margin-bottom: 0;
+        }
+
+        .meta-label {
+          color: #6b7c93;
+          font-weight: 500;
+        }
+
+.meta-value {
+          color: #32325d;
+          font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+        }
+
+
+
+        /* Tax information section */
+        .tax-info-section {
+          background: #f0f7ff;
+          border: 1px solid #bfdbfe;
+          border-radius: 6px;
+          padding: 16px;
+          margin: 16px 0;
+          font-size: 13px;
+          color: #1e40af;
+        }
+
+        .tax-info-title {
+          font-weight: 600;
+          margin-bottom: 8px;
           display: flex;
           align-items: center;
           gap: 8px;
         }
-        
-        .detail-value {
-          color: #32325d;
-          font-weight: 500;
+
+        .tax-info-title svg {
+          width: 16px;
+          height: 16px;
+          fill: currentColor;
         }
-        
-        .total-row {
-          border-top: 1px solid #e6ebf1;
-          padding-top: 12px;
-          margin-top: 12px;
-          font-weight: 600;
-          font-size: 16px;
+
+        .tax-info-details {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
         }
-        
-        .variant-section {
+
+        /* Summary section for desktop */
+        .summary-section {
+          display: none;
+          margin-top: 24px;
           background: #f8f9fa;
           border: 1px solid #e6ebf1;
           border-radius: 6px;
           padding: 20px;
-          margin-top: 20px;
         }
-        
+
+        /* Responsive Design */
+        @media only screen and (min-width: 992px) {
+          .container {
+            height: 100%;
+          }
+          
+          .app {
+            align-items: stretch;
+            transform: translateY(max(48px, calc(50vh - 600px)));
+            padding-top: 0;
+            animation-delay: 0.2s;
+            animation-fill-mode: backwards;
+            flex-direction: row;
+            justify-content: space-between;
+            max-width: 920px;
+          }
+          
+          .overview {
+            padding-bottom: calc(16px + 12px);
+            margin-bottom: 0;
+            width: 380px;
+            margin: 0;
+            padding: 0;
+          }
+          
+          .payment {
+            height: 100%;
+            padding-top: 0;
+            margin: 0;
+            padding: 24px 20px 24px 20px;
+            width: 400px;
+          }
+          
+          .payment > * {
+            max-width: none;
+            margin: 0;
+          }
+          
+          .header {
+            background-color: inherit;
+          }
+          
+          .product-summary {
+            justify-content: left;
+            align-items: flex-start;
+            margin-top: 48px;
+            text-align: left;
+          }
+          
+          .total-amount {
+            font-size: 36px;
+          }
+          
+          .total-amount-container {
+            justify-content: flex-start;
+          }
+
+          .summary-section {
+            display: block;
+          }
+
+          .quantity-section {
+            text-align: left;
+          }
+        }
+
+        /* Variants styling */
+        .variants-section {
+          margin: 20px 0;
+        }
+
         .variant-group {
           margin-bottom: 16px;
         }
-        
+
         .variant-label {
           font-size: 13px;
           font-weight: 500;
-          color: #6b7c93;
+          color: hsla(0,0%,10%,0.7);
           margin-bottom: 8px;
           display: block;
         }
-        
-        .variant-select {
-          width: 100%;
-          padding: 12px;
-          border: 1px solid #cfd7df;
-          border-radius: 4px;
-          font-size: 16px;
-          color: #32325d;
-          background: white;
-          appearance: none;
-          cursor: pointer;
+
+        .variant-options {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
         }
-        
-        .variant-select:focus {
-          outline: none;
-          border-color: #635bff;
-          box-shadow: 0 0 0 3px rgba(99, 91, 255, 0.2);
-        }
-        
-        .quantity-section {
-          background: #f8f9fa;
+
+        .variant-option {
+          padding: 8px 16px;
           border: 1px solid #e6ebf1;
           border-radius: 6px;
-          padding: 20px;
-          margin-top: 20px;
-        }
-        
-        .quantity-controls {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-        
-        .quantity-btn {
-          width: 36px;
-          height: 36px;
-          border: 1px solid #cfd7df;
-          border-radius: 4px;
           background: white;
           color: #32325d;
+          font-size: 14px;
+          font-weight: 500;
           cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 16px;
-          transition: background-color 0.15s;
+          transition: all 0.15s;
+          box-shadow: 0 0 0 1px #e0e0e0, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
         }
-        
-        .quantity-btn:hover:not(:disabled) {
-          background: #f8f9fa;
+
+        .variant-option:hover:not(.disabled) {
+          box-shadow: 0 0 0 1px #635bff, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
         }
-        
-        .quantity-btn:disabled {
+
+        .variant-option.selected {
+          background: #635bff;
+          color: white;
+          border-color: #635bff;
+        }
+
+        .variant-option.disabled {
           opacity: 0.5;
           cursor: not-allowed;
         }
-        
-        .quantity-input {
-          width: 60px;
-          height: 36px;
-          border: 1px solid #cfd7df;
-          border-radius: 4px;
-          text-align: center;
-          font-size: 16px;
-          color: #32325d;
-        }
-        
-        .quantity-input:focus {
-          outline: none;
-          border-color: #635bff;
-          box-shadow: 0 0 0 3px rgba(99, 91, 255, 0.2);
-        }
-        
+
+        /* Shipping methods styling */
         .shipping-section {
-          background: #f8f9fa;
+          margin: 20px 0;
+        }
+
+        .shipping-label {
+          font-size: 13px;
+          font-weight: 500;
+          color: hsla(0,0%,10%,0.7);
+          margin-bottom: 8px;
+          display: block;
+        }
+
+        .shipping-options {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .shipping-option {
+          padding: 12px 16px;
           border: 1px solid #e6ebf1;
           border-radius: 6px;
-          padding: 20px;
-          margin-top: 20px;
-        }
-        
-        .shipping-select {
-          width: 100%;
-          padding: 12px;
-          border: 1px solid #cfd7df;
-          border-radius: 4px;
-          font-size: 16px;
-          color: #32325d;
           background: white;
-          appearance: none;
           cursor: pointer;
+          transition: all 0.15s;
+          box-shadow: 0 0 0 1px #e0e0e0, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
         }
-        
-        .shipping-select:focus {
-          outline: none;
+
+        .shipping-option:hover {
+          box-shadow: 0 0 0 1px #635bff, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+        }
+
+        .shipping-option.selected {
           border-color: #635bff;
-          box-shadow: 0 0 0 3px rgba(99, 91, 255, 0.2);
+          box-shadow: 0 0 0 1px #635bff, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
         }
-        
-        .error-message {
-          background: #fdf2f2;
-          border: 1px solid #fecaca;
-          border-radius: 6px;
-          padding: 16px;
-          margin-top: 20px;
-          color: #dc2626;
+
+        .shipping-option-info {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+
+        .shipping-option-name {
           font-size: 14px;
+          font-weight: 500;
+          color: #32325d;
         }
-        
-        .availability-message {
-          background: #fdf2f2;
+
+        .shipping-option-details {
+          font-size: 12px;
+          color: hsla(0,0%,10%,0.6);
+        }
+
+        .shipping-option-price {
+          font-size: 14px;
+          font-weight: 500;
+          color: #32325d;
+        }
+
+        /* Subscription and trial badges */
+        .subscription-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 12px;
+          background: #f0f7ff;
+          border: 1px solid #3b82f6;
+          border-radius: 6px;
+          font-size: 12px;
+          color: #1d4ed8;
+          font-weight: 500;
+          margin: 8px 0;
+        }
+
+        .subscription-badge svg {
+          width: 14px;
+          height: 14px;
+          fill: currentColor;
+        }
+
+        .trial-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 12px;
+          background: #f0fdf4;
+          border: 1px solid #22c55e;
+          border-radius: 6px;
+          font-size: 12px;
+          color: #166534;
+          font-weight: 500;
+          margin: 8px 0;
+        }
+
+        .trial-badge svg {
+          width: 14px;
+          height: 14px;
+          fill: currentColor;
+        }
+
+        /* Error message */
+        .error-message {
+          background: #fef2f2;
           border: 1px solid #fecaca;
           border-radius: 6px;
           padding: 16px;
-          margin-top: 20px;
+          margin-bottom: 20px;
           color: #dc2626;
           font-size: 14px;
           text-align: center;
         }
-        
-        @media (max-width: 768px) {
-          .checkout-wrapper {
-            flex-direction: column;
-            max-width: 400px;
-          }
-          
-          .product-section {
-            border-right: none;
-            border-bottom: 1px solid #e6ebf1;
-            padding: 30px 20px;
-          }
-          
-          .payment-section {
-            padding: 30px 20px;
-          }
-          
-          .product-image {
-            max-width: 150px;
-            height: 120px;
-          }
-          
-          .product-price {
-            font-size: 28px;
-          }
+
+        .availability-message {
+          background: #fef2f2;
+          border: 1px solid #fecaca;
+          border-radius: 6px;
+          padding: 16px;
+          margin: 20px 0;
+          color: #dc2626;
+          font-size: 14px;
+          text-align: center;
         }
       `}</style>
       
-      <div className="checkout-container">
-        <div className="checkout-wrapper">
-          {/* Product Section */}
-          <div className="product-section">
-            <div className="header">
-              <div className="business-icon">
-                <svg width="14" height="14" viewBox="0 0 576 512" fill="currentColor">
-                  <path d="M547.6 103.8L490.3 13.1C485.2 5 476.1 0 466.4 0H109.6C99.9 0 90.8 5 85.7 13.1L28.3 103.8c-29.6 46.8-3.4 111.9 51.9 119.4c4 .5 8.1 .8 12.1 .8c26.1 0 49.3-11.4 65.2-29c15.9 17.6 39.1 29 65.2 29c26.1 0 49.3-11.4 65.2-29c15.9 17.6 39.1 29 65.2 29c26.2 0 49.3-11.4 65.2-29c16 17.6 39.1 29 65.2 29c4.1 0 8.1-.3 12.1-.8c55.5-7.4 81.8-72.5 52.1-119.4zM512 224c-17.7 0-32 14.3-32 32V448c0 17.7-14.3 32-32 32H128c-17.7 0-32-14.3-32-32V256c0-17.7-14.3-32-32-32s-32 14.3-32 32V448c0 53 43 96 96 96H448c53 0 96-43 96-96V256c0-17.7-14.3-32-32-32z"/>
-                </svg>
+      <div className="container">
+        <div className="app">
+          <div className="overview">
+            <header className="header">
+              <div className="header-content">
+                <div style={{ flex: '0 1 auto', maxWidth: '100%', minWidth: 0, display: 'flex', alignItems: 'center' }}>
+                  <div className="business">
+                    <div className="business-icon business-image">
+                      <svg focusable="false" viewBox="0 0 16 16">
+                        <path d="M3 7.5V12h10V7.5c.718 0 1.398-.168 2-.468V15a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V7.032c.602.3 1.282.468 2 .468zM0 3L1.703.445A1 1 0 0 1 2.535 0h10.93a1 1 0 0 1 .832.445L16 3a3 3 0 0 1-5.5 1.659C9.963 5.467 9.043 6 8 6s-1.963-.533-2.5-1.341A3 3 0 0 1 0 3z" fillRule="evenodd"></path>
+                      </svg>
+                    </div>
+                    <h1 className="business-name">Store</h1>
+                  </div>
+                </div>
+                {/* Mobile summary toggle */}
+                <button
+                  className={`mobile-summary-toggle ${showMobileSummary ? 'open' : ''}`}
+                  onClick={() => setShowMobileSummary(!showMobileSummary)}
+                >
+                  Summary
+                  <svg viewBox="0 0 12 12" fill="currentColor">
+                    <path d="M10.193 3.97a.75.75 0 0 1 1.062 1.062L6.53 9.756a.75.75 0 0 1-1.06 0L.745 5.032A.75.75 0 0 1 1.807 3.97L6 8.163l4.193-4.193z" fillRule="evenodd"></path>
+                  </svg>
+                </button>
+                {showMobileSummary && (
+                  <div className="mobile-summary-dropdown">
+                    <div className="mobile-summary-content">
+                      <CheckoutSummary
+                        product={product}
+                        quantity={quantity}
+                        variantSelections={variantSelections}
+                        selectedShipping={selectedShipping}
+                        localCurrency={localCurrency}
+                        subtotal={subtotal}
+                        vat={vat}
+                        shipping={shipping}
+                        total={total}
+                        displayCurrency={displayCurrency}
+                        taxRate={taxInfo.rate}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="business-name">Store</div>
+            </header>
+
+            <div className="product-summary">
+              {/* Product Images */}
+              <div className="product-images-section">
+                {product.images && product.images.length > 0 ? (
+                  <>
+                    <div className="product-image-main">
+                      <img 
+                        src={formatImageUrl(product.images[selectedImageIndex]?.url || product.images[0].url)} 
+                        alt={product.title} 
+                      />
+                    </div>
+                    
+                    {product.images.length > 1 && (
+                      <div className="product-thumbnails">
+                        {product.images.map((image, index) => (
+                          <button
+                            key={index}
+                            className={`product-thumbnail ${selectedImageIndex === index ? 'active' : ''}`}
+                            onClick={() => setSelectedImageIndex(index)}
+                            type="button"
+                          >
+                            <img
+                              src={formatImageUrl(image.url)}
+                              alt={`Thumbnail ${index + 1}`}
+                            />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="product-image-main">
+                    <div className="product-image-placeholder">
+                      <svg viewBox="0 0 24 24" fill="none">
+                        <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" fill="currentColor"/>
+                      </svg>
+                      <div>No image available</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="product-info">
+                <span className="product-name">
+                  <div style={{ WebkitLineClamp: 2 }}>{product.title}</div>
+                </span>
+                <div className="amounts-container">
+                  <div className="totals-read">
+                    <div className="total-amount-container">
+                      <div>
+                        <span className="total-amount">
+                          {formatPrice(total, displayCurrency)}
+                          {recurringText && (
+                            <span className="subscription-interval">{recurringText}</span>
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <div>
+                        <div className="amounts-descriptions">
+                          <span className="product-description">
+                            <div>
+                              <div>{product.shortDescription}</div>
+                            </div>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Trial and subscription badges */}
+                {trialText && (
+                  <div className="trial-badge">
+                    <svg viewBox="0 0 24 24" fill="none">
+                      <path d="M20 6h-2.18c.11-.31.18-.65.18-1a2.996 2.996 0 0 0-5.5-1.65l-.5.67-.5-.68C10.96 2.54 10.05 2 9 2 7.34 2 6 3.34 6 5c0 .35.07.69.18 1H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-5-2c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zM9 4c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1z" fill="currentColor"/>
+                    </svg>
+                    {trialText}
+                  </div>
+                )}
+                {recurringText && (
+                  <div className="subscription-badge">
+                    <svg viewBox="0 0 24 24" fill="none">
+                      <path d="M12 4V1L8 5L12 9V6C15.31 6 18 8.69 18 12C18 12.79 17.85 13.54 17.57 14.21L19.07 15.71C19.66 14.71 20 13.39 20 12C20 7.58 16.42 4 12 4ZM12 18C8.69 18 6 15.31 6 12C6 11.21 6.15 10.46 6.43 9.79L4.93 8.29C4.34 9.29 4 10.61 4 12C4 16.42 7.58 20 12 20V23L16 19L12 15V18Z" fill="currentColor"/>
+                    </svg>
+                    Subscription
+                  </div>
+                )}
+
+                {/* Product Meta Information (SKU, Barcode) */}
+                {(initialProduct.sku || initialProduct.barcode) && (
+                  <div className="product-meta">
+                    {initialProduct.sku && (
+                      <div className="meta-row">
+                        <span className="meta-label">SKU:</span>
+                        <span className="meta-value">{initialProduct.sku}</span>
+                      </div>
+                    )}
+                    {initialProduct.barcode && (
+                      <div className="meta-row">
+                        <span className="meta-label">Barcode:</span>
+                        <span className="meta-value">{initialProduct.barcode}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+{/* Quantity and Stock Section */}
+{initialProduct.quantityEnabled === true && (
+  <div className="quantity-section">
+    <div className="quantity-text-block">
+      <label className="quantity-label">Quantity</label>
+      {stockText && (
+        <div className={`stock-info ${
+          stockText.includes('Out of stock') ? 'stock-error' : 
+          stockText.includes('Only') ? 'stock-warning' : 'stock-available'
+        }`}>
+          {stockText}
+        </div>
+      )}
+    </div>
+    <button className="quantity-button" onClick={openQuantityModal}>
+      {quantity}
+      <svg viewBox="0 0 12 12" fill="currentColor">
+        <path d="M10.193 3.97a.75.75 0 0 1 1.062 1.062L6.53 9.756a.75.75 0 0 1-1.06 0L.745 5.032A.75.75 0 0 1 1.807 3.97L6 8.163l4.193-4.193z" fillRule="evenodd"></path>
+      </svg>
+    </button>
+  </div>
+)}
+
+
+
+                {/* Tax Information Display 
+                {selectedCountry && taxInfo.rate > 0 && (
+                  <div className="tax-info-section">
+                    <div className="tax-info-title">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M13,17H11V15H13V17M13,13H11V7H13V13Z" fill="currentColor"/>
+                      </svg>
+                      Tax Information
+                    </div>
+                    <div className="tax-info-details">
+                      <div>
+                        <svg style={{ width: '12px', height: '12px', marginRight: '4px', verticalAlign: 'middle' }} viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M12,11.5A2.5,2.5 0 0,1 9.5,9A2.5,2.5 0 0,1 12,6.5A2.5,2.5 0 0,1 14.5,9A2.5,2.5 0 0,1 12,11.5M12,2A7,7 0 0,0 5,9C5,14.25 12,22 12,22S19,14.25 19,9A7,7 0 0,0 12,2Z"/>
+                        </svg>
+                        Location: {selectedCountry}{selectedState ? `, ${selectedState}` : ''}
+                      </div>
+                      <div>
+                        <svg style={{ width: '12px', height: '12px', marginRight: '4px', verticalAlign: 'middle' }} viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M5,6H23V18H5V6M14,9A3,3 0 0,1 17,12A3,3 0 0,1 14,15A3,3 0 0,1 11,12A3,3 0 0,1 14,9M9,8A2,2 0 0,1 7,10V14A2,2 0 0,1 9,16H19A2,2 0 0,1 21,14V10A2,2 0 0,1 19,8H9Z"/>
+                        </svg>
+                        {taxInfo.type.toUpperCase()} Rate: {(taxInfo.rate * 100).toFixed(1)}%
+                      </div>
+                    </div>
+                  </div>
+                )} */}
+
+                {/* Desktop summary section */}
+                <div className="summary-section">
+                  <CheckoutSummary
+                    product={product}
+                    quantity={quantity}
+                    variantSelections={variantSelections}
+                    selectedShipping={selectedShipping}
+                    localCurrency={localCurrency}
+                    subtotal={subtotal}
+                    vat={vat}
+                    shipping={shipping}
+                    total={total}
+                    displayCurrency={displayCurrency}
+                    taxRate={taxInfo.rate}
+                  />
+                </div>
+              </div>
             </div>
-            
-            <div className="product-image">
-              {getMainImageUrl() ? (
-                <img src={getMainImageUrl()} alt={product.title} />
-              ) : (
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#8898aa',
-                  fontSize: '14px',
-                }}>
-                  No image
+          </div>
+          
+          {/* Payment Section */}
+          <div className="payment">
+            <main>
+              {errorMessage && (
+                <div className="error-message">
+                  {errorMessage}
                 </div>
               )}
+              
+              {!canPurchase && stockText && stockText.includes('Out of stock') ? (
+                <div className="availability-message">
+                  {stockText}
+                </div>
+              ) : (
+                <>
+                  {/* Variants Section */}
+                  {initialProduct.variants && initialProduct.variants.length > 0 && (
+                    <div className="variants-section">
+                      {initialProduct.variants.map((variant, variantIndex) => {
+                        const selection = variantSelections.find(s => s.name === variant.name);
+                        
+                        return (
+                          <div key={variantIndex} className="variant-group">
+                            <label className="variant-label">{variant.name}</label>
+                            <div className="variant-options">
+                              {variant.values.map((value, valueIndex) => {
+                                // Check if this variant value is available
+                                let isAvailable = true;
+                                let stockInfo = '';
+                                
+                                // Only check stock if stock management is enabled (variant.stock is defined)
+                                if (variant.stock !== undefined) {
+                                  if (variant.stock === 0) {
+                                    isAvailable = false;
+                                    stockInfo = 'Out of stock';
+                                  } else if (variant.stock < quantity) {
+                                    isAvailable = false;
+                                    stockInfo = `Only ${variant.stock} available`;
+                                  } else if (variant.stock < 10) {
+                                    stockInfo = `${variant.stock} left`;
+                                  }
+                                }
+                                
+                                const isSelected = selection?.value === value;
+                                
+                                return (
+                                  <button
+                                    key={valueIndex}
+                                    className={`variant-option ${isSelected ? 'selected' : ''} ${!isAvailable ? 'disabled' : ''}`}
+                                    onClick={() => isAvailable && handleVariantChange(variant.name, value)}
+                                    type="button"
+                                  >
+                                    {value}
+                                    {stockInfo && (
+                                      <span style={{ fontSize: '11px', marginLeft: '4px' }}>
+                                        ({stockInfo})
+                                      </span>
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  
+                  {/* Shipping Section - Only for physical products */}
+                  {initialProduct.type === 'physical' && initialProduct.physical?.shippingMethods && initialProduct.physical.shippingMethods.length > 0 && (
+                    <div className="shipping-section">
+                      <label className="shipping-label">Shipping Method</label>
+                      <div className="shipping-options">
+                        {initialProduct.physical.shippingMethods.map((method, index) => {
+                          const isSelected = selectedShipping === method.name;
+                          const shippingPrice = method.price > 0 
+                            ? formatPrice(method.price, initialProduct.defaultCurrency)
+                            : 'Free';
+                          
+                          return (
+                            <button
+                              key={index}
+                              className={`shipping-option ${isSelected ? 'selected' : ''}`}
+                              onClick={() => setSelectedShipping(method.name)}
+                              type="button"
+                            >
+                              <div className="shipping-option-info">
+                                <div className="shipping-option-name">{method.name}</div>
+                                <div className="shipping-option-details">
+                                  {method.minDays}-{method.maxDays} business days
+                                </div>
+                              </div>
+                              <div className="shipping-option-price">{shippingPrice}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Payment Form */}
+                  <PaymentForm
+                    currency={paymentDetails.currency}
+                    amount={paymentDetails.amount}
+                    transactionId={transactionId}
+                    onSubmit={handleSubmit}
+                    isSubmitting={isSubmitting}
+                    productOwnerId={initialProduct.merchantId || ''}
+                    productId={initialProduct._id}
+                    productName={initialProduct.title}
+                    quantity={quantity}
+                    onCountryChange={handleCountryChange}
+                    onStateChange={handleStateChange}
+                  />
+                </>
+              )}
+            </main>
+          </div>
+        </div>
+      </div>
+
+      {/* Quantity Modal */}
+      {showQuantityModal && (
+        <div className="modal-backdrop" onClick={closeQuantityModal}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Select Quantity</h3>
+              <button className="modal-close" onClick={closeQuantityModal}>
+                ×
+              </button>
             </div>
-            
-            <div className="product-title">{product.title}</div>
-            <div className="product-price">
-              {formatPrice(displayPrice * quantity, displayCurrency)}
-            </div>
-            <div className="product-description">{product.shortDescription}</div>
-            
-            {/* Variants Section */}
-            {product.variants && product.variants.length > 0 && (
-              <div className="variant-section">
-                <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#32325d', marginBottom: '16px' }}>
-                  Product Options
-                </h4>
-                {product.variants.map((variant, index) => (
-                  <div key={index} className="variant-group">
-                    <label className="variant-label">{variant.name}</label>
-                    <select
-                      className="variant-select"
-                      value={variantSelections.find(s => s.name === variant.name)?.value || ''}
-                      onChange={(e) => handleVariantChange(variant.name, e.target.value)}
-                    >
-                      <option value="">Select {variant.name}</option>
-                      {variant.values.map((value, valueIndex) => (
-                        <option key={valueIndex} value={value}>
-                          {value}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ))}
-              </div>
-            )}
-            
-            {/* Quantity Section */}
-            <div className="quantity-section">
-              <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#32325d', marginBottom: '16px' }}>
-                Quantity
-              </h4>
-              <div className="quantity-controls">
+            <div className="modal-body">
+              <div className="quantity-modal-controls">
                 <button
-                  type="button"
-                  className="quantity-btn"
-                  onClick={() => handleQuantityChange(Math.max(1, quantity - 1))}
+                  className="quantity-modal-btn"
+                  onClick={() => handleQuantityChange(quantity - 1)}
                   disabled={quantity <= 1}
                 >
                   −
                 </button>
                 <input
                   type="number"
-                  className="quantity-input"
-                  min="1"
-                  max={product.physical?.stock || 99}
+                  className="quantity-modal-input"
                   value={quantity}
-                  onChange={(e) => handleQuantityChange(Math.max(1, parseInt(e.target.value) || 1))}
+                  onChange={(e) => handleQuantityChange(parseInt(e.target.value) || 1)}
+                  min="1"
+                  max={maxQuantity}
                 />
                 <button
-                  type="button"
-                  className="quantity-btn"
+                  className="quantity-modal-btn"
                   onClick={() => handleQuantityChange(quantity + 1)}
-                  disabled={product.physical?.stock ? quantity >= product.physical.stock : false}
+                  disabled={quantity >= maxQuantity}
                 >
                   +
                 </button>
               </div>
-              {product.physical?.stock && (
-                <div style={{ fontSize: '12px', color: '#8898aa', marginTop: '8px' }}>
-                  {product.physical.stock} available
+              
+              {maxQuantity < 999 && (
+                <div className={`stock-info-modal ${maxQuantity < 10 ? 'low' : ''}`}>
+                  Maximum available: {maxQuantity}
                 </div>
               )}
             </div>
-            
-            {/* Shipping Section */}
-            {product.type === 'physical' && product.physical?.shippingMethods && product.physical.shippingMethods.length > 0 && (
-              <div className="shipping-section">
-                <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#32325d', marginBottom: '16px' }}>
-                  Shipping Method
-                </h4>
-                <select
-                  className="shipping-select"
-                  value={selectedShipping}
-                  onChange={(e) => setSelectedShipping(e.target.value)}
-                >
-                  {product.physical.shippingMethods.map((method, index) => (
-                    <option key={index} value={method.name}>
-                      {method.name} {method.price > 0 
-                        ? `(${formatPrice(method.price, product.defaultCurrency)})` 
-                        : '(Free)'}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-            
-            <button
-              type="button"
-              className="view-details-btn"
-              onClick={() => setShowProductDetails(!showProductDetails)}
-            >
-              <span>{showProductDetails ? 'Hide details' : 'View details'}</span>
-              <i className={`fas fa-chevron-down view-details-icon`}></i>
-            </button>
-            
-            <div className="product-details">
-              <div className="detail-row">
-                <span className="detail-label">{product.title}</span>
-                <span className="detail-value">
-                  {formatPrice(displayPrice * quantity, displayCurrency)}
-                </span>
-              </div>
-              
-              {variantSelections.length > 0 && variantSelections.every(v => v.value) && (
-                <div style={{ marginBottom: '12px' }}>
-                  {variantSelections.map((selection, index) => (
-                    <div key={index} style={{ fontSize: '12px', color: '#8898aa', marginBottom: '4px' }}>
-                      {selection.name}: {selection.value}
-                    </div>
-                  ))}
-                </div>
-              )}
-              
-              <div className="detail-row">
-                <span className="detail-label">Subtotal</span>
-                <span className="detail-value">
-                  {formatPrice(prices.subtotal, prices.currency)}
-                </span>
-              </div>
-              
-              {prices.vat > 0 && (
-                <div className="detail-row">
-                  <span className="detail-label">VAT</span>
-                  <span className="detail-value">
-                    {formatPrice(prices.vat, prices.currency)}
-                  </span>
-                </div>
-              )}
-              
-              {prices.shipping > 0 && (
-                <div className="detail-row">
-                  <span className="detail-label">Shipping</span>
-                  <span className="detail-value">
-                    {formatPrice(prices.shipping, prices.currency)}
-                  </span>
-                </div>
-              )}
-              
-              {prices.shipping === 0 && selectedShipping && (
-                <div className="detail-row">
-                  <span className="detail-label">Shipping</span>
-                  <span className="detail-value" style={{ color: '#00d924' }}>Free</span>
-                </div>
-              )}
-              
-              <div className="detail-row total-row">
-                <span className="detail-label">Total</span>
-                <span className="detail-value">
-                  {formatPrice(prices.total, prices.currency)}
-                </span>
-              </div>
-              
-              {/* Show original price if converted */}
-              {displayCurrency !== product.defaultCurrency && (
-                <div style={{ fontSize: '12px', color: '#8898aa', marginTop: '12px' }}>
-                  Original: {formatPrice(initialProduct.price * quantity, initialProduct.defaultCurrency)}
-                </div>
-              )}
-            </div>
-            
-            {product.longDescription && (
-              <div style={{ marginTop: '30px' }}>
-                <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#32325d', marginBottom: '12px' }}>
-                  Description
-                </h4>
-                <div style={{ fontSize: '13px', color: '#8898aa', lineHeight: '1.6' }}
-                     dangerouslySetInnerHTML={{ __html: product.longDescription }} />
-              </div>
-            )}
-          </div>
-          
-          {/* Payment Section */}
-          <div className="payment-section">
-            {errorMessage && (
-              <div className="error-message">
-                {errorMessage}
-              </div>
-            )}
-            
-            {!canPurchase && product.type === 'physical' ? (
-              <div className="availability-message">
-                This product is currently out of stock or unavailable with the selected options.
-              </div>
-            ) : canPurchase && !isLoading && transactionId && initialProduct ? (
-              <PaymentForm
-                currency={paymentDetails.currency}
-                amount={paymentDetails.amount}
-                transactionId={transactionId}
-                onSubmit={handleSubmit}
-                isSubmitting={isSubmitting}
-                productOwnerId={initialProduct.merchantId || ''}
-                productId={initialProduct._id}
-                productName={initialProduct.title}
-                quantity={quantity}
-              />
-            ) : null}
           </div>
         </div>
-      </div>
+      )}
     </>
   );
 };

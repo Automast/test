@@ -34,6 +34,9 @@ interface PaymentFormProps {
   productId: string;
   productName: string;
   quantity: number;
+  // Add country and state change handlers for VAT calculation
+  onCountryChange?: (countryCode: string) => void;
+  onStateChange?: (stateCode: string) => void;
 }
 
 // Interface for CheckoutForm props
@@ -51,11 +54,14 @@ interface CheckoutFormPropsInternal {
   productId: string;
   productName: string;
   quantityParam: number;
+  onCountryChange?: (countryCode: string) => void;
+  onStateChange?: (stateCode: string) => void;
 }
 
+// Initialize Stripe immediately when module loads
 let stripePromiseSingleton: Promise<Stripe | null> | null = null;
 
-const getStripeInstance = (): Promise<Stripe | null> => {
+const initializeStripe = () => {
   if (!stripePromiseSingleton) {
     stripePromiseSingleton = (async () => {
       try {
@@ -90,6 +96,17 @@ const getStripeInstance = (): Promise<Stripe | null> => {
   return stripePromiseSingleton;
 };
 
+// Start loading Stripe immediately
+const getStripeInstance = () => {
+  if (!stripePromiseSingleton) {
+    initializeStripe();
+  }
+  return stripePromiseSingleton!;
+};
+
+// Initialize immediately when this module loads
+initializeStripe();
+
 const CARD_ELEMENT_OPTIONS = {
   style: {
     base: {
@@ -97,6 +114,7 @@ const CARD_ELEMENT_OPTIONS = {
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif',
       fontSmoothing: 'antialiased',
       fontSize: '16px',
+      lineHeight: '24px',
       '::placeholder': {
         color: '#aab7c4',
       },
@@ -106,7 +124,7 @@ const CARD_ELEMENT_OPTIONS = {
       iconColor: '#fa755a',
     },
   },
-  showIcon: false,
+  showIcon: true,
 };
 
 const CheckoutForm: React.FC<CheckoutFormPropsInternal> = ({
@@ -123,6 +141,8 @@ const CheckoutForm: React.FC<CheckoutFormPropsInternal> = ({
   productId,
   productName,
   quantityParam,
+  onCountryChange,
+  onStateChange,
 }) => {
   const stripe = useStripe();
   const elements = useElements();
@@ -131,23 +151,56 @@ const CheckoutForm: React.FC<CheckoutFormPropsInternal> = ({
   const [countries, setCountries] = useState<ICountry[]>([]);
   const [states, setStates] = useState<IState[]>([]);
   const [selectedCountry, setSelectedCountry] = useState<string>(billingInfo.country || '');
+  const [countryLocked, setCountryLocked] = useState<boolean>(false);
   const [clientSecret, setClientSecret] = useState<string>('');
   const [paymentIntentCreated, setPaymentIntentCreated] = useState(false);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'card' | 'pix'>('card');
   const [addressLine2, setAddressLine2] = useState<string>('');
+  const [saveInfo, setSaveInfo] = useState(true);
 
   const pixSupported = isPixSupported(currency);
+
+  // Auto-detect and lock country on component mount
+  useEffect(() => {
+    const detectAndLockCountry = async () => {
+      if (!selectedCountry || selectedCountry === '') {
+        try {
+          const countryIsoCode = await getUserCountry();
+          logger.info("[CheckoutForm] Detected user country:", countryIsoCode);
+          if (countryIsoCode) {
+            setSelectedCountry(countryIsoCode);
+            setBillingInfo(prev => ({ ...prev, country: countryIsoCode }));
+            setCountryLocked(true);
+            if (onCountryChange) {
+              onCountryChange(countryIsoCode);
+            }
+          }
+        } catch (error) {
+          logger.error('[CheckoutForm] Error detecting country, defaulting to US:', error);
+          setSelectedCountry('US');
+          setBillingInfo(prev => ({ ...prev, country: 'US' }));
+          setCountryLocked(true);
+          if (onCountryChange) {
+            onCountryChange('US');
+          }
+        }
+      } else {
+        // If country is already set, just lock it
+        setCountryLocked(true);
+      }
+    };
+
+    detectAndLockCountry();
+  }, []); // Only run once on mount
 
   useEffect(() => {
     setCountries(Country.getAllCountries());
   }, []);
 
+  // Fixed useEffect hooks to prevent loops
   useEffect(() => {
     if (selectedCountry) {
       setStates(State.getStatesOfCountry(selectedCountry));
-      if (billingInfo.country !== selectedCountry) {
-        setBillingInfo(prev => ({ ...prev, country: selectedCountry, state: '' }));
-      }
     } else {
       setStates([]);
     }
@@ -159,6 +212,21 @@ const CheckoutForm: React.FC<CheckoutFormPropsInternal> = ({
     }
   }, [billingInfo.country, selectedCountry]);
 
+  // Single effect for notifying parent about location changes
+  useEffect(() => {
+    // Only notify if we have a complete location change and avoid rapid calls
+    const timeoutId = setTimeout(() => {
+      if (onCountryChange && selectedCountry) {
+        onCountryChange(selectedCountry);
+      }
+      if (onStateChange && billingInfo.state) {
+        onStateChange(billingInfo.state);
+      }
+    }, 100); // Small delay to prevent rapid calls
+
+    return () => clearTimeout(timeoutId);
+  }, [selectedCountry, billingInfo.state]); // Remove callback functions from dependencies
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setBillingInfo(prev => ({ ...prev, [name]: value }));
@@ -168,8 +236,20 @@ const CheckoutForm: React.FC<CheckoutFormPropsInternal> = ({
   };
 
   const handleCountryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSelectedCountry(e.target.value);
+    const newCountry = e.target.value;
+    setSelectedCountry(newCountry);
+    setBillingInfo(prev => ({ ...prev, country: newCountry, state: '' }));
   };
+
+  const handleStateChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newState = e.target.value;
+    setBillingInfo(prev => ({ ...prev, state: newState }));
+  };
+  
+  const handlePaymentMethodChange = (method: 'card' | 'pix') => {
+    setSelectedPaymentMethod(method);
+    setPaymentError(''); // Clear errors when switching
+  }
 
   const createPaymentIntent = async (): Promise<string | null> => {
     if (paymentIntentCreated || clientSecret) {
@@ -183,33 +263,33 @@ const CheckoutForm: React.FC<CheckoutFormPropsInternal> = ({
       const apiUrl = `${baseUrl.replace(/\/api$/, '')}/api/payments/create-intent`;
       
       logger.info('[PaymentForm] Creating payment intent for transaction:', transactionId);
-const response = await fetch(apiUrl, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    amount, // This is already smallest unit (e.g. cents)
-    currency: currency.toLowerCase(), // This is the currency code like 'brl'
-    transactionId, // The TX_... ID
-    description: `Purchase: ${productName} (x${quantityParam}) - TX: ${transactionId}`,
-    // Pass new data
-    productOwnerId: productOwnerId,
-    productId: productId,
-    productName: productName,
-    quantity: quantityParam,
-    customerEmail: billingInfo.email,
-    // Add billing info to be stored in Stripe metadata
-    billingInfo: {
-      name: billingInfo.name || '',
-      email: billingInfo.email || '',
-      phone: billingInfo.phone || '',
-      address: billingInfo.address || '',
-      city: billingInfo.city || '',
-      state: billingInfo.state || '',
-      postalCode: billingInfo.postalCode || '',  
-      country: billingInfo.country || ''
-    }
-  }),
-});
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount, // This is already smallest unit (e.g. cents)
+          currency: currency.toLowerCase(), // This is the currency code like 'brl'
+          transactionId, // The TX_... ID
+          description: `Purchase: ${productName} (x${quantityParam}) - TX: ${transactionId}`,
+          // Pass new data
+          productOwnerId: productOwnerId,
+          productId: productId,
+          productName: productName,
+          quantity: quantityParam,
+          customerEmail: billingInfo.email,
+          // Add billing info to be stored in Stripe metadata
+          billingInfo: {
+            name: billingInfo.name || '',
+            email: billingInfo.email || '',
+            phone: billingInfo.phone || '',
+            address: billingInfo.address || '',
+            city: billingInfo.city || '',
+            state: billingInfo.state || '',
+            postalCode: billingInfo.postalCode || '',  
+            country: billingInfo.country || ''
+          }
+        }),
+      });
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({message: "Failed to parse error from create-intent"}));
@@ -365,713 +445,823 @@ const response = await fetch(apiUrl, {
     }).format(amount / 100);
   };
 
+  const getFlagIcon = (countryCode: string) => {
+    return `https://flagcdn.com/w20/${countryCode.toLowerCase()}.png`;
+  };
+
   return (
     <>
       <style jsx>{`
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
+        * {
+          box-sizing: border-box;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", "Ubuntu", sans-serif;
         }
         
-        .form-group {
-          margin-bottom: 24px;
+        body {
+          margin: 0;
+          padding: 0;
+          font-size: 16px;
+          line-height: 1.3;
+          color: hsla(0,0%,10%,0.9);
+          -webkit-font-smoothing: antialiased;
+          touch-action: manipulation;
         }
         
-        .form-label {
-          display: block;
+        fieldset {
+          border: none;
+          padding: 0;
+          margin: 0;
+        }
+
+        .error-message {
+          color: #dc2727;
           font-size: 13px;
-          font-weight: 500;
-          color: #6b7c93;
+          margin-top: 6px;
+          width: 100%; /* Ensure it takes full width in flex container */
+        }
+
+        .payment-error-display {
+          color: #fff;
+          background-color: #dc2727;
+          border-radius: 6px;
+          padding: 12px;
+          margin: 16px 0;
+          font-size: 14px;
+          text-align: center;
+        }
+        
+        /* Forms */
+        .form-section {
           margin-bottom: 8px;
         }
         
-        .section-title {
+        .form-heading {
+          margin-top: 24px;
+          margin-bottom: 16px;
+          color: hsla(0,0%,10%,0.9);
           font-size: 16px;
           font-weight: 500;
-          color: #32325d;
-          margin-bottom: 16px;
         }
         
-        .form-input {
-          width: 100%;
-          padding: 12px;
-          border: 1px solid #cfd7df;
-          border-radius: 4px;
-          font-size: 16px;
-          color: #32325d;
-          background: white;
-          transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        .field-group {
+          margin: 4px 0 0 0;
         }
         
-        .form-input:focus {
-          outline: none;
-          border-color: #635bff;
-          box-shadow: 0 0 0 3px rgba(99, 91, 255, 0.2);
-        }
-        
-        .form-input::placeholder {
-          color: #aab7c4;
-        }
-        
-        .billing-group {
-          border: 1px solid #cfd7df;
-          border-radius: 4px;
-          overflow: hidden;
-          background: white;
-        }
-        
-        .billing-group .form-input {
-          border: none;
-          border-radius: 0;
-          width: 100%;
-        }
-        
-        .billing-group .form-input:focus {
-          box-shadow: none;
-          border-color: transparent;
-        }
-        
-        .billing-group > *:not(:last-child) {
-          border-bottom: 1px solid #e6ebf1;
-        }
-        
-        .billing-row {
+        .field-label-container {
+          overflow-wrap: anywhere;
+          position: relative;
           display: flex;
+          justify-content: space-between;
         }
         
-        .billing-row .form-input {
-          border-bottom: none;
+        .field-label {
+          color: hsla(0,0%,10%,0.7);
+          font-size: 13px;
+          font-weight: 500;
+          margin-bottom: 6px;
+          display: block;
         }
         
-        .billing-row .form-input:first-child {
-          border-right: 1px solid #e6ebf1;
+        .field-container {
+          display: flex;
+          flex-wrap: wrap;
+          position: relative;
+        }
+        
+        .field-child {
+          box-sizing: border-box;
+          flex: 0 1 auto;
+          max-width: 100%;
+          min-width: 0;
+          transform-origin: 0%;
+        }
+        
+        .field-child--width-12 {
+          width: 100%;
+        }
+        
+        .field-child--width-6 {
+          width: 50%;
+        }
+        
+        .input-wrapper {
+          display: block;
+          margin: 0;
+          padding: 0;
+          position: relative;
+        }
+        
+        .input-container {
+          position: relative;
+          height: 44px; /* Ensure consistent height */
+        }
+        
+        .input, .select {
+          appearance: none;
+          background: white;
+          border: 0;
+          box-shadow: 0 0 0 1px #e0e0e0, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+          color: hsla(0,0%,10%,0.9);
+          font-size: 16px;
+          height: 44px;
+          line-height: 1.5;
+          padding: 8px 12px;
+          position: relative;
+          transition: box-shadow 0.08s ease-in, color 0.08s ease-in;
+          width: 100%;
+          border-radius: 6px;
+        }
+
+        /* Stripe Elements Styling - Key Addition */
+        .stripe-element-wrapper {
+            background: white;
+            box-shadow: 0 0 0 1px #e0e0e0, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+            color: hsla(0,0%,10%,0.9);
+            height: 44px;
+            padding: 10px 12px;
+            transition: box-shadow 0.08s ease-in, color 0.08s ease-in;
+            width: 100%;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .stripe-element-wrapper:focus-within {
+            box-shadow: 0 0 0 1px rgba(50,151,211,0.7), 0 1px 1px 0 rgba(0,0,0,0.07), 0 0 0 4px rgba(50,151,211,0.3);
+            outline: none;
+            z-index: 2;
+        }
+        
+        .StripeElement {
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+        }
+
+
+.card-group {
+  border-radius: 6px;
+  overflow: hidden;
+  background: white;
+  box-shadow: 0 0 0 1px #e0e0e0, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+}
+
+.card-number-input {
+  position: relative;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e0e0e0;
+  height: 44px;
+  display: block; /* Changed from flex */
+}
+
+.card-row {
+  display: flex;
+  height: 44px;
+}
+
+.card-expiry {
+  flex: 1;
+  position: relative;
+  padding: 10px 12px;
+  border-right: 1px solid #e0e0e0;
+  display: block; /* Changed from flex */
+}
+
+.card-cvc {
+  flex: 1;
+  position: relative;
+  padding: 10px 12px;
+  display: block; /* Changed from flex */
+}
+
+        .input::placeholder, .select::placeholder {
+          color: hsla(0,0%,10%,0.5);
+        }
+        
+        .input:focus, .select:focus {
+          box-shadow: 0 0 0 1px rgba(50,151,211,0.7), 0 1px 1px 0 rgba(0,0,0,0.07), 0 0 0 4px rgba(50,151,211,0.3);
+          outline: none;
+          z-index: 2;
+        }
+        
+        .input-with-icon {
+          text-indent: 24px;
+        }
+        
+        .input-icon {
+          left: 12px;
+          pointer-events: none;
+          position: absolute;
+          top: 50%;
+          transform: translateY(-50%);
+          z-index: 3;
+        }
+        
+        .input-icon svg {
+          fill: hsla(0,0%,10%,0.5);
+        }
+        
+        /* Form Groups - Remove square borders for grouped fields */
+        .field-container .field-child .input,
+        .field-container .field-child .select,
+        .field-container .field-child .stripe-element-wrapper {
+            border-radius: 0;
+            height: 44px;
+        }
+        
+        .field-top.field-left .input,
+        .field-top.field-left .select,
+        .field-top.field-left .stripe-element-wrapper {
+          border-top-left-radius: 6px;
+        }
+        
+        .field-top.field-right .input,
+        .field-top.field-right .select,
+        .field-top.field-right .stripe-element-wrapper {
+          border-top-right-radius: 6px;
+        }
+        
+        .field-bottom.field-left .input,
+        .field-bottom.field-left .select,
+        .field-bottom.field-left .stripe-element-wrapper {
+          border-bottom-left-radius: 6px;
+        }
+        
+        .field-bottom.field-right .input,
+        .field-bottom.field-right .select,
+        .field-bottom.field-right .stripe-element-wrapper {
+          border-bottom-right-radius: 6px;
+        }
+        
+        /* Phone Input */
+        .phone-wrapper {
+          position: relative;
         }
         
         .phone-input {
-          position: relative;
+          padding-right: 26px;
+        }
+
+        .flag-icon-wrapper {
+            cursor: pointer;
+            height: 16px;
+            width: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         
         .flag-icon {
-          position: absolute;
-          left: 12px;
-          top: 50%;
-          transform: translateY(-50%);
-          width: 20px;
-          height: 15px;
-          z-index: 2;
-          object-fit: cover;
+          height: 16px;
+          width: auto;
+          max-width: 22px;
           border-radius: 2px;
         }
         
-        .phone-input .form-input {
-          padding-left: 36px;
-          padding-right: 40px;
-          border: none;
+        /* Select */
+        .select-wrapper {
+          display: flex;
+          position: relative;
+          height: 100%;
         }
         
-        .info-icon {
+        .select {
+          padding-right: 48px;
+        }
+        
+        .select-arrow {
+          height: 12px;
+          margin-top: -6px;
+          pointer-events: none;
           position: absolute;
           right: 12px;
           top: 50%;
-          transform: translateY(-50%);
-          color: #8898aa;
-          font-size: 12px;
-          cursor: help;
+          width: 12px;
+          z-index: 3;
         }
         
-        .payment-methods {
-          margin: 20px 0;
-        }
-        
-        .payment-method {
-          border: 1px solid #e6ebf1;
+        /* Payment Methods Accordion */
+        .accordion {
+          background-color: white;
           border-radius: 6px;
-          margin-bottom: 12px;
-          overflow: hidden;
-          transition: border-color 0.15s, box-shadow 0.15s;
+          box-shadow: 0 0 0 1px #e0e0e0, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+          margin: 4px 0 0 0;
         }
         
-        .payment-method:hover {
-          border-color: #cfd7df;
+        .accordion-item {
+          border-top: 1px solid #e0e0e0;
+          transition: height 0.3s cubic-bezier(0.19,1,0.22,1);
         }
         
-        .payment-method.selected {
-          border-color: #000;
+        .accordion-item:first-child {
+          border-top: none;
         }
         
-        .payment-method-header {
-          padding: 16px;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          cursor: pointer;
-          background: #fff;
-          transition: background-color 0.15s;
-          border: none;
-          width: 100%;
-          text-align: left;
-        }
-        
-        .payment-method-header:hover {
-          background: #f8f9fa;
-        }
-        
-        .payment-radio {
-          width: 18px;
-          height: 18px;
-          border: 2px solid #cfd7df;
-          border-radius: 50%;
+        .accordion-header {
           position: relative;
-          flex-shrink: 0;
-        }
-        
-        .payment-radio.checked {
-          border-color: #000;
-        }
-        
-        .payment-radio.checked::after {
-          content: '';
-          width: 8px;
-          height: 8px;
-          background: #000;
-          border-radius: 50%;
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-        }
-        
-        .payment-method-info {
-          flex: 1;
+          padding: 12px;
+          cursor: pointer;
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 16px;
+        }
+
+        .payment-title-inner {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 8px;
         }
         
-        .payment-method-icon {
-          width: 32px;
-          height: 20px;
-          background: #f7f9fa;
-          border: 1px solid #e6ebf1;
+        .radio-btn {
+            appearance: none;
+            background-clip: content-box;
+            background-color: white;
+            border-radius: 50%;
+            box-shadow: inset 0 0 0 1px hsla(0,0%,10%,0.4);
+            display: inline-block;
+            height: 16px;
+            width: 16px;
+            min-width: 16px;
+            transition: 0.2s ease;
+            cursor: pointer;
+        }
+
+        .radio-btn:checked {
+            box-shadow: inset 0 0 0 5px black;
+        }
+
+        .payment-icon {
+          height: 16px;
+          text-align: center;
+          width: 24px;
+        }
+        
+        .payment-icon img {
+            border-radius: 2px;
+            height: 16px;
+            max-width: 24px;
+            width: auto;
+        }
+
+        .pix-icon {
+            background: #32BCAD;
+            color: #fff;
+            font-weight: bold;
+            font-size: 10px;
+            line-height: 16px;
+            border-radius: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+        }
+
+        .payment-title-text {
+            color: hsla(0,0%,10%,0.9);
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .brand-icons-container {
+            margin-left: auto;
+            display: flex;
+            gap: 4px;
+        }
+
+        .brand-icon {
+            height: 16px;
+            width: auto;
+        }
+
+        .accordion-content {
+          padding: 0 12px 12px;
+          width: 100%;
+        }
+
+        /* Checkbox */
+        .signup-form {
+            margin-top: 24px;
+        }
+        .signup-header {
+            background-color: white;
+            border-radius: 6px;
+            box-shadow: 0 0 0 1px #e0e0e0, 0 2px 4px 0 rgba(0,0,0,0.07), 0 1px 1.5px 0 rgba(0,0,0,0.05);
+            display: flex;
+            flex-direction: row;
+            padding: 12px;
+        }
+        .checkbox-field {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            cursor: pointer;
+            width: 100%;
+        }
+        .checkbox-input {
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            margin-top: 2px;
+            min-width: 16px;
+            position: absolute;
+            opacity: 0;
+            cursor: pointer;
+        }
+        .checkbox-styled {
+          width: 16px;
+          height: 16px;
+          margin-top: 2px;
+          min-width: 16px;
+          background-color: white;
           border-radius: 4px;
+          box-shadow: 0 0 0 1px #e0e0e0, 0 1px 1px 0 rgba(0,0,0,0.05);
+          position: relative;
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 12px;
-          color: #32325d;
-          font-weight: 600;
+          transition: all 0.2s ease;
         }
-        
-        .payment-method-name {
-          font-size: 16px;
-          font-weight: 500;
-          color: #32325d;
+        .checkbox-input:checked + .checkbox-styled {
+          background-color: #32325d;
+          box-shadow: 0 0 0 1px #32325d;
         }
-        
-        .payment-icons {
-          display: flex;
-          gap: 6px;
-        }
-        
-        .card-brand-icon {
-          width: 24px;
-          height: 16px;
-        }
-        
-        .payment-details {
-          padding: 0 16px 16px;
-          border-top: 1px solid #e6ebf1;
+        .checkbox-tick {
           display: none;
+          color: white;
+          width: 10px;
+          height: 10px;
         }
-        
-        .payment-method.selected .payment-details {
+        .checkbox-input:checked + .checkbox-styled .checkbox-tick {
           display: block;
         }
-        
-        .card-group {
-          border: 1px solid #cfd7df;
-          border-radius: 4px;
-          overflow: hidden;
-          background: white;
-        }
-        
-        .card-number-input {
-          position: relative;
-          padding: 12px;
-          border-bottom: 1px solid #e6ebf1;
-        }
-        
-        .card-row {
-          display: flex;
-        }
-        
-        .card-expiry {
-          flex: 1;
-          position: relative;
-          padding: 12px;
-          border-right: 1px solid #e6ebf1;
-        }
-        
-        .card-cvc {
-          flex: 1;
-          position: relative;
-          padding: 12px;
-        }
-        
-        .cvc-icon {
-          position: absolute;
-          right: 12px;
-          top: 50%;
-          transform: translateY(-50%);
-          color: #8898aa;
-          font-size: 14px;
-        }
-        
-        .billing-checkbox {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin-top: 16px;
-          font-size: 14px;
-          color: #6b7c93;
-        }
-        
-        .billing-checkbox input[type="checkbox"] {
-          width: 16px;
-          height: 16px;
-          accent-color: #000;
-        }
-        
-        .checkbox-group {
-          display: flex;
-          align-items: flex-start;
-          gap: 12px;
-          padding: 16px;
-          border: 1px solid #e6ebf1;
-          border-radius: 4px;
-          background: #f7f9fc;
-          margin-bottom: 24px;
-        }
-        
-        .checkbox {
-          margin-top: 2px;
-          width: 16px;
-          height: 16px;
-          accent-color: #000;
-        }
-        
         .checkbox-label {
-          font-size: 13px;
-          color: #32325d;
-          line-height: 1.4;
+            color: hsla(0,0%,10%,0.9);
+            font-size: 14px;
+            font-weight: 400;
+            user-select: none;
         }
-        
-        .checkbox-sublabel {
-          font-size: 13px;
-          color: #8898aa;
-          margin-top: 4px;
+        .signup-label-header {
+            font-weight: 500;
         }
-        
-        .pay-button {
-          width: 100%;
-          padding: 14px;
-          background: #0073E6;
-          color: white;
-          border: none;
-          border-radius: 6px;
-          font-size: 16px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: background-color 0.15s ease;
-          margin-bottom: 16px;
+        .signup-sub-label {
+            color: hsla(0,0%,10%,0.7);
+            font-size: 13px;
+            margin-top: 4px;
         }
-        
-        .pay-button:hover:not(:disabled) {
-          background: #0066CC;
+
+        /* Submit Button */
+        .submit-btn {
+            background-color: #0074d4;
+            border: 0;
+            border-radius: 6px;
+            box-shadow: inset 0 0 0 1px rgba(50,50,93,0.1), 0 2px 5px 0 rgba(50,50,93,0.1), 0 1px 1px 0 rgba(0,0,0,0.07);
+            color: white;
+            cursor: pointer;
+            height: 44px;
+            margin-top: 24px;
+            outline: none;
+            padding: 0;
+            position: relative;
+            transition: all 0.2s ease, box-shadow 0.08s ease-in;
+            width: 100%;
+            font-size: 16px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
-        
-        .pay-button:disabled {
-          background: #8898aa;
-          cursor: not-allowed;
+        .submit-btn:disabled {
+            cursor: default;
+            background-color: #aab7c4;
         }
-        
+        .submit-btn:hover:not(:disabled) {
+            background-color: rgb(0,94,187);
+        }
+        .spinner {
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-left-color: #ffffff;
+            border-radius: 50%;
+            width: 18px;
+            height: 18px;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+
+        /* Footer */
         .footer {
-          text-align: center;
-          margin-top: 24px;
+            text-align: center;
+            color: hsla(0,0%,10%,0.7);
+            font-size: 13px;
+            margin-top: 16px;
         }
-        
-        .footer-text {
-          font-size: 12px;
-          color: #8898aa;
-          margin-bottom: 8px;
-        }
-        
         .footer-links {
           display: flex;
           justify-content: center;
           gap: 16px;
+          margin-top: 8px;
         }
-        
         .footer-link {
-          font-size: 12px;
-          color: #8898aa;
-          text-decoration: none;
+            cursor: pointer;
+            text-decoration: none;
+            color: hsla(0,0%,10%,0.7);
         }
-        
         .footer-link:hover {
-          text-decoration: underline;
+            text-decoration: underline dotted hsla(0,0%,10%,0.7);
         }
-        
-        .or-divider {
-          text-align: center;
-          margin: 20px 0;
-          position: relative;
-          color: #8898aa;
-          font-size: 14px;
-        }
-        
-        .or-divider::before {
-          content: '';
-          position: absolute;
-          top: 50%;
-          left: 0;
-          right: 0;
-          height: 1px;
-          background: #e6ebf1;
-        }
-        
-        .or-divider span {
-          background: #fff;
-          padding: 0 16px;
-          position: relative;
-        }
-        
-        .error-display {
-          background: #fdf2f2;
-          border: 1px solid #fecaca;
-          border-radius: 6px;
-          padding: 12px;
-          margin-bottom: 16px;
-          color: #dc2626;
-          font-size: 14px;
-          text-align: center;
-        }
-        
-        .hidden-methods {
-          display: none;
-        }
+
+        .flex { display: flex; }
+        .flex-col { flex-direction: column; }
+        .flex-wrap { flex-wrap: wrap; }
+        .width-12 { width: 100%; }
+        .gap-16 { gap: 16px; }
       `}</style>
 
-      <form onSubmit={handleSubmit}>
-        {/* Pay with Link Button - Hidden for now */}
-        <div className="hidden-methods">
-          <div className="form-group">
-            <button type="button" style={{
-              width: '100%',
-              padding: '14px',
-              background: '#00D924',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              fontSize: '16px',
-              fontWeight: '600',
-              cursor: 'pointer',
-              marginBottom: '16px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px'
-            }}>
-              Pay with <strong>link</strong>
-            </button>
-            <div className="or-divider">
-              <span>Or</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Shipping Information */}
-        <div className="form-group">
-          <div className="section-title">Shipping information</div>
-          
-          <div className="form-group">
-            <label className="form-label">Email</label>
-            <input 
-              type="email" 
-              name="email"
-              className="form-input" 
-              placeholder="email@example.com" 
-              value={billingInfo.email}
-              onChange={handleInputChange}
-              required 
-              disabled={isSubmitting || processing}
-            />
-            {errors.email && <div style={{color: '#dc2626', fontSize: '12px', marginTop: '4px'}}>{errors.email}</div>}
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Shipping address</label>
-            <div className="billing-group">
-              <input 
-                type="text" 
-                name="name"
-                className="form-input" 
-                placeholder="Full name" 
-                value={billingInfo.name}
-                onChange={handleInputChange}
-                required 
-                disabled={isSubmitting || processing}
-              />
-              {errors.name && <p className="mt-1 text-xs text-red-600">{errors.name}</p>}
-              
-              <select 
-                name="country"
-                className="form-input" 
-                value={selectedCountry}
-                onChange={handleCountryChange}
-                required
-                disabled={isSubmitting || processing}
-              >
-                <option value="">Select Country</option>
-                {countries.map((country) => (
-                  <option key={country.isoCode} value={country.isoCode}>
-                    {country.name}
-                  </option>
-                ))}
-              </select>
-              {errors.country && <p className="mt-1 text-xs text-red-600">{errors.country}</p>}
-              
-              <input 
-                type="text" 
-                name="address"
-                className="form-input" 
-                placeholder="Address line 1" 
-                value={billingInfo.address}
-                onChange={handleInputChange}
-                required 
-                disabled={isSubmitting || processing}
-              />
-              {errors.address && <p className="mt-1 text-xs text-red-600">{errors.address}</p>}
-              
-              <input 
-                type="text" 
-                className="form-input" 
-                placeholder="Address line 2" 
-                value={addressLine2}
-                onChange={(e) => setAddressLine2(e.target.value)}
-                disabled={isSubmitting || processing}
-              />
-              
-              <div className="billing-row">
-                <input 
-                  type="text" 
-                  name="city"
-                  className="form-input" 
-                  placeholder="City" 
-                  value={billingInfo.city}
-                  onChange={handleInputChange}
-                  required 
-                  disabled={isSubmitting || processing}
-                />
-                {errors.city && <p className="mt-1 text-xs text-red-600">{errors.city}</p>}
-                <input 
-                  type="text" 
-                  name="postalCode"
-                  className="form-input" 
-                  placeholder="ZIP" 
-                  value={billingInfo.postalCode}
-                  onChange={handleInputChange}
-                  required 
-                  disabled={isSubmitting || processing}
-                />
-                {errors.postalCode && <p className="mt-1 text-xs text-red-600">{errors.postalCode}</p>}
-              </div>
-              
-              {states.length > 0 ? (
-                <select 
-                  name="state"
-                  className="form-input" 
-                  value={billingInfo.state}
-                  onChange={handleInputChange}
-                  required
-                  disabled={isSubmitting || processing || states.length === 0}
-                >
-                  <option value="">Select State</option>
-                  {states.map((state) => (
-                    <option key={state.isoCode} value={state.isoCode}>
-                      {state.name}
-                    </option>
-                  ))}
-                </select>
-              ) : selectedCountry ? (
-                <input 
-                  type="text" 
-                  name="state"
-                  className="form-input" 
-                  placeholder="State / Province (if applicable)" 
-                  value={billingInfo.state}
-                  onChange={handleInputChange}
-                  disabled={isSubmitting || processing}
-                />
-              ) : null}
-              {errors.state && <p className="mt-1 text-xs text-red-600">{errors.state}</p>}
-              
-              <div className="phone-input">
-                <img 
-                  src={`https://flagcdn.com/w20/${selectedCountry.toLowerCase()}.png`} 
-                  alt={selectedCountry} 
-                  className="flag-icon"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src = "https://flagcdn.com/w20/us.png";
-                  }}
-                />
-                <input 
-                  type="tel" 
-                  name="phone"
-                  className="form-input" 
-                  placeholder="Phone number (optional)" 
-                  value={billingInfo.phone || ''}
-                  onChange={handleInputChange}
-                  disabled={isSubmitting || processing}
-                />
-                <i className="fas fa-info-circle info-icon"></i>
-              </div>
-              {errors.phone && <p className="mt-1 text-xs text-red-600">{errors.phone}</p>}
-            </div>
-          </div>
-        </div>
-
-        {/* Payment Methods */}
-        <div className="form-group">
-          <div className="section-title">Payment method</div>
-          
-          <div className="payment-methods">
-            {/* Card Payment */}
-            <div className={`payment-method ${selectedPaymentMethod === 'card' ? 'selected' : ''}`}>
-              <button 
-                type="button" 
-                className="payment-method-header" 
-                onClick={() => setSelectedPaymentMethod('card')}
-              >
-                <div className={`payment-radio ${selectedPaymentMethod === 'card' ? 'checked' : ''}`}></div>
-                <div className="payment-method-info">
-                  <div className="payment-method-icon">
-                    <i className="fas fa-credit-card"></i>
-                  </div>
-                  <span className="payment-method-name">Card</span>
-                </div>
-                <div className="payment-icons">
-                  <img src="https://js.stripe.com/v3/fingerprinted/img/visa-365725566f9578a9589553aa9296d178.svg" alt="Visa" className="card-brand-icon" />
-                  <img src="https://js.stripe.com/v3/fingerprinted/img/mastercard-4d8844094130711885b5e41b28c9848f.svg" alt="Mastercard" className="card-brand-icon" />
-                  <img src="https://js.stripe.com/v3/fingerprinted/img/amex-a49b82f46c5cd6a96a6e418a6ca1717c.svg" alt="American Express" className="card-brand-icon" />
-                  <img src="https://js.stripe.com/v3/fingerprinted/img/jcb-271fd06e6e0a5af2601265d1107d8c96.svg" alt="JCB" className="card-brand-icon" />
-                </div>
-              </button>
-              
-              <div className="payment-details">
-                <div className="form-group">
-                  <label className="form-label">Card information</label>
-                  <div className="card-group">
-                    <div className="card-number-input">
-                      <CardNumberElement options={CARD_ELEMENT_OPTIONS} />
-                    </div>
-                    
-                    <div className="card-row">
-                      <div className="card-expiry">
-                        <CardExpiryElement options={CARD_ELEMENT_OPTIONS} />
-                      </div>
-                      <div className="card-cvc">
-                        <CardCvcElement options={CARD_ELEMENT_OPTIONS} />
-                        <i className="fas fa-credit-card cvc-icon"></i>
+      <main>
+        <form onSubmit={handleSubmit} noValidate>
+          <div className="flex flex-col gap-16">
+            
+            {/* Contact Information */}
+            <div>
+              <h2 className="form-heading">Contact information</h2>
+              <div className="field-group">
+                <fieldset className="field-container">
+                  <div className="field-child field-child--width-12 field-left field-right field-top">
+                    <div className="input-wrapper">
+                      <div className="input-container">
+                        <div className="input-icon">
+                          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M16 3.6C16 2.72 15.28 2 14.4 2H1.6C0.72 2 0 2.72 0 3.6L0 12.4C0 13.28 0.72 14 1.6 14H14.4C15.28 14 16 13.28 16 12.4V3.6ZM14.4 3.6L8 7.6L1.6 3.6H14.4ZM14.4 12.4H1.6V5.2L8 9.2L14.4 5.2V12.4Z"></path>
+                          </svg>
+                        </div>
+                        <input
+                          className="input input-with-icon"
+                          type="email"
+                          name="email"
+                          placeholder="email@example.com"
+                          value={billingInfo.email}
+                          onChange={handleInputChange}
+                          required
+                          disabled={isSubmitting || processing}
+                        />
                       </div>
                     </div>
+                    {errors.email && <p className="error-message">{errors.email}</p>}
                   </div>
-                </div>
-              </div>
-            </div>
-
-            {/* PIX Payment - Only show for BRL */}
-            {pixSupported && (
-              <div className={`payment-method ${selectedPaymentMethod === 'pix' ? 'selected' : ''}`}>
-                <button 
-                  type="button" 
-                  className="payment-method-header" 
-                  onClick={() => setSelectedPaymentMethod('pix')}
-                >
-                  <div className={`payment-radio ${selectedPaymentMethod === 'pix' ? 'checked' : ''}`}></div>
-                  <div className="payment-method-info">
-                    <div className="payment-method-icon" style={{background: '#32BCAD', color: '#fff'}}>
-                      PIX
+                  
+                  <div className="field-child field-child--width-12 field-left field-right field-bottom">
+                    <div className="input-wrapper">
+                      <div className="input-container phone-wrapper">
+                         <div className="input-icon">
+                            <div className="flag-icon-wrapper">
+                              {selectedCountry && <img className="flag-icon" src={getFlagIcon(selectedCountry)} alt={selectedCountry} />}
+                            </div>
+                         </div>
+                        <input
+                          className="input phone-input input-with-icon"
+                          type="tel"
+                          name="phone"
+                          placeholder="Phone (optional)"
+                          value={billingInfo.phone || ''}
+                          onChange={handleInputChange}
+                          disabled={isSubmitting || processing}
+                        />
+                      </div>
                     </div>
-                    <span className="payment-method-name">PIX</span>
+                    {errors.phone && <p className="error-message">{errors.phone}</p>}
                   </div>
-                </button>
-                <div className="payment-details">
-                  <div style={{padding: '16px 0', fontSize: '14px', color: '#6b7c93'}}>
-                    You will receive PIX payment instructions after clicking "Pay".
-                  </div>
-                </div>
+                </fieldset>
               </div>
-            )}
-          </div>
-        </div>
-
-        {/* Save Information Checkbox */}
-        <div className="checkbox-group">
-          <input type="checkbox" id="save-info" className="checkbox" />
-          <label htmlFor="save-info">
-            <div className="checkbox-label">Securely save my information for 1-click checkout</div>
-            <div className="checkbox-sublabel">Pay faster on our store and everywhere Link is accepted.</div>
-          </label>
-        </div>
-
-        {/* Error Display */}
-        {paymentError && (
-          <div className="error-display">
-            {paymentError}
-          </div>
-        )}
-
-        {/* Pay Button */}
-        <button 
-          type="submit" 
-          className="pay-button"
-          disabled={isSubmitting || processing || (selectedPaymentMethod === 'card' && (!stripe || !elements))}
-        >
-          {isSubmitting || processing ? (
-            <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'}}>
-              <div style={{
-                width: '16px',
-                height: '16px',
-                border: '2px solid white',
-                borderTop: '2px solid transparent',
-                borderRadius: '50%',
-                animation: 'spin 1s linear infinite'
-              }}></div>
-              <span>Processing...</span>
             </div>
-          ) : (
-            `Pay ${getDisplayAmount()}`
-          )}
-        </button>
-        
-        {selectedPaymentMethod === 'card' && (
-          <div style={{textAlign: 'center', marginTop: '16px', fontSize: '13px', color: '#8898aa'}}>
-            Your payment information is secure and encrypted.
-          </div>
-        )}
-      </form>
 
-      {/* Footer */}
-      <div className="footer">
-        <div className="footer-text">
-          Powered by <strong>Arkus</strong>
-        </div>
-        <div className="footer-links">
-          <a href="#" className="footer-link">Terms</a>
-          <a href="#" className="footer-link">Privacy</a>
-        </div>
+            {/* Payment Method */}
+            <div>
+              <h2 className="form-heading">Payment method</h2>
+              <div className="accordion">
+                {/* Card Payment Method */}
+                <div className="accordion-item">
+                  <div className="accordion-header" onClick={() => handlePaymentMethodChange('card')}>
+                    <input
+                      id="payment-method-card"
+                      name="payment-method"
+                      type="radio"
+                      className="radio-btn"
+                      value="card"
+                      checked={selectedPaymentMethod === 'card'}
+                      onChange={() => handlePaymentMethodChange('card')}
+                    />
+                    <div className="payment-title-inner">
+                        <div className="payment-icon">
+                            <img src="https://js.stripe.com/v3/fingerprinted/img/card-ce24697297bd3c6a00fdd2fb6f760f0d.svg" alt="Card" />
+                        </div>
+                        <div className="payment-title-text">Card</div>
+                    </div>
+                    <div className="brand-icons-container">
+                        <img src="https://js.stripe.com/v3/fingerprinted/img/visa-729c05c240c4bdb47b03ac81d9945bfe.svg" alt="Visa" className="brand-icon"/>
+                        <img src="https://js.stripe.com/v3/fingerprinted/img/mastercard-4d8844094130711885b5e41b28c9848f.svg" alt="Mastercard" className="brand-icon"/>
+                        <img src="https://js.stripe.com/v3/fingerprinted/img/amex-a49b82f46c5cd6a96a6e418a6ca1717c.svg" alt="Amex" className="brand-icon"/>
+                    </div>
+                  </div>
+                  {selectedPaymentMethod === 'card' && (
+                    <div className="accordion-content">
+                      <div className="flex flex-col gap-16">
+                        {/* Card Information */}
+                        <div className="field-group">
+                          <label className="field-label">Card information</label>
+<div className="card-group">
+  <div className="card-number-input">
+    <CardNumberElement options={CARD_ELEMENT_OPTIONS} />
+  </div>
+  
+  <div className="card-row">
+    <div className="card-expiry">
+      <CardExpiryElement options={CARD_ELEMENT_OPTIONS} />
+    </div>
+    <div className="card-cvc">
+      <CardCvcElement options={CARD_ELEMENT_OPTIONS} />
+    </div>
+  </div>
+</div>
+                        </div>
+
+                        {/* Billing Details */}
+                        <div className="field-group">
+                           <label className="field-label">Billing address</label>
+                           <fieldset>
+                             <div className="field-container">
+                               <div className="field-child field-child--width-12 field-left field-right field-top">
+                                 <div className="input-container">
+                                   <input className="input" name="name" placeholder="Cardholder name" value={billingInfo.name} onChange={handleInputChange} required />
+                                 </div>
+                                 {errors.name && <p className="error-message">{errors.name}</p>}
+                               </div>
+
+<div className="field-child field-child--width-12 field-left field-right">
+  <div className="input-wrapper">
+      <div className="select-wrapper">
+          <select 
+            name="country" 
+            className="select" 
+            value={selectedCountry} 
+            onChange={handleCountryChange} 
+            required
+            disabled={countryLocked}
+            style={{
+              backgroundColor: countryLocked ? '#f8f9fa' : 'white',
+              cursor: countryLocked ? 'not-allowed' : 'pointer'
+            }}
+          >
+            <option value="" disabled>
+              {countryLocked ? 'Auto-detected location' : 'Country or region'}
+            </option>
+            {countries.map(c => <option key={c.isoCode} value={c.isoCode}>{c.name}</option>)}
+          </select>
+          {!countryLocked && <svg className="select-arrow" focusable="false" viewBox="0 0 12 12"><path d="M10.193 3.97a.75.75 0 0 1 1.062 1.062L6.53 9.756a.75.75 0 0 1-1.06 0L.745 5.032A.75.75 0 0 1 1.807 3.97L6 8.163l4.193-4.193z" fillRule="evenodd"></path></svg>}
       </div>
+  </div>
+  {errors.country && <p className="error-message">{errors.country}</p>}
+
+</div>
+
+                               <div className="field-child field-child--width-12 field-left field-right">
+                                 <div className="input-container"><input className="input" name="address" placeholder="Address line 1" value={billingInfo.address} onChange={handleInputChange} required /></div>
+                                 {errors.address && <p className="error-message">{errors.address}</p>}
+                               </div>
+
+                               <div className="field-child field-child--width-12 field-left field-right">
+                                 <div className="input-container"><input className="input" name="addressLine2" placeholder="Address line 2 (optional)" value={addressLine2} onChange={e => setAddressLine2(e.target.value)} /></div>
+                               </div>
+
+                               {/* START: Added City Field */}
+                               <div className="field-child field-child--width-12 field-left field-right">
+                                 <div className="input-container">
+                                   <input
+                                     className="input"
+                                     name="city"
+                                     placeholder="City"
+                                     value={billingInfo.city}
+                                     onChange={handleInputChange}
+                                     required
+                                   />
+                                 </div>
+                                 {errors.city && <p className="error-message">{errors.city}</p>}
+                               </div>
+                               {/* END: Added City Field */}
+
+                               <div className="field-child field-child--width-6 field-left field-bottom">
+                                 {states.length > 0 ? (
+                                   <div className="input-wrapper">
+                                    <div className="select-wrapper">
+                                      <select name="state" className="select" value={billingInfo.state} onChange={handleStateChange} required>
+                                        <option value="" disabled>State</option>
+                                        {states.map(s => <option key={s.isoCode} value={s.isoCode}>{s.name}</option>)}
+                                      </select>
+                                      <svg className="select-arrow" focusable="false" viewBox="0 0 12 12"><path d="M10.193 3.97a.75.75 0 0 1 1.062 1.062L6.53 9.756a.75.75 0 0 1-1.06 0L.745 5.032A.75.75 0 0 1 1.807 3.97L6 8.163l4.193-4.193z" fillRule="evenodd"></path></svg>
+                                    </div>
+                                   </div>
+                                 ) : (
+                                   <div className="input-container"><input className="input" name="state" placeholder="State / Province" value={billingInfo.state} onChange={handleInputChange} /></div>
+                                 )}
+                                 {errors.state && <p className="error-message">{errors.state}</p>}
+                               </div>
+
+                               <div className="field-child field-child--width-6 field-right field-bottom">
+                                 <div className="input-container"><input className="input" name="postalCode" placeholder="ZIP / Postal code" value={billingInfo.postalCode} onChange={handleInputChange} required /></div>
+                                 {errors.postalCode && <p className="error-message">{errors.postalCode}</p>}
+                               </div>
+                             </div>
+                           </fieldset>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* PIX Payment Method */}
+                {pixSupported && (
+                  <div className="accordion-item">
+                    <div className="accordion-header" onClick={() => handlePaymentMethodChange('pix')}>
+                      <input
+                        id="payment-method-pix"
+                        name="payment-method"
+                        type="radio"
+                        className="radio-btn"
+                        value="pix"
+                        checked={selectedPaymentMethod === 'pix'}
+                        onChange={() => handlePaymentMethodChange('pix')}
+                      />
+                      <div className="payment-title-inner">
+                        <div className="payment-icon pix-icon">PIX</div>
+                        <div className="payment-title-text">PIX</div>
+                      </div>
+                    </div>
+                    {selectedPaymentMethod === 'pix' && (
+                       <div className="accordion-content">
+                         <p style={{fontSize: '14px', color: 'hsla(0,0%,10%,0.7)'}}>You will receive PIX payment instructions after clicking "Pay".</p>
+                       </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Save Information */}
+            <div className="signup-form">
+              <div className="signup-header">
+                <label htmlFor="save-info-checkbox" className="checkbox-field">
+                  <input
+                    id="save-info-checkbox"
+                    name="saveInfo"
+                    type="checkbox"
+                    className="checkbox-input"
+                    checked={saveInfo}
+                    onChange={(e) => setSaveInfo(e.target.checked)}
+                  />
+                  <span className="checkbox-styled">
+                    <svg className="checkbox-tick" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z" />
+                    </svg>
+                  </span>
+                  <div className="checkbox-label">
+                      <div className="signup-label-header">Save my info for 1-click checkout with Link</div>
+                      <div className="signup-sub-label">Securely pay on this site and everywhere Link is accepted.</div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            {paymentError && <div className="payment-error-display">{paymentError}</div>}
+
+            {/* Submit Button */}
+            <button
+              type="submit"
+              className="submit-btn"
+              disabled={isSubmitting || processing || (selectedPaymentMethod === 'card' && (!stripe || !elements))}
+            >
+              {isSubmitting || processing ? (
+                <>
+                  <div className="spinner"></div>
+                  Processing...
+                </>
+              ) : (
+                `Pay ${getDisplayAmount()}`
+              )}
+            </button>
+          </div>
+        </form>
+
+        <footer className="footer">
+          <div>Your payment information is secure.</div>
+          <div className="footer-links">
+            <a href="#" className="footer-link">Terms</a>
+            <a href="#" className="footer-link">Privacy</a>
+          </div>
+        </footer>
+      </main>
     </>
   );
 };
@@ -1085,35 +1275,31 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   productOwnerId,
   productId,
   productName,
-  quantity
+  quantity,
+  onCountryChange,
+  onStateChange
 }) => {
   const [billingInfo, setBillingInfo] = useState<IBillingInfo>({
     email: '', phone: '', name: '', address: '', city: '', state: '', postalCode: '', country: '',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [stripeApiPromise, setStripeApiPromise] = useState<Promise<Stripe | null> | null>(null);
+  // Use the already initialized Stripe promise
+  const [stripeApiPromise] = useState<Promise<Stripe | null> | null>(() => {
+    logger.info('[PaymentForm] Using pre-initialized Stripe.js promise.');
+    return getStripeInstance();
+  });
   const [stripeError, setStripeError] = useState<string>('');
 
-  const pixSupported = isPixSupported(currency);
+  // Remove the country detection useEffect from here since it's now handled in CheckoutForm
 
+  // Monitor stripe promise for errors
   useEffect(() => {
-    const detectCountry = async () => {
-      try {
-        const countryIsoCode = await getUserCountry();
-        logger.info("[PaymentForm] Detected user country:", countryIsoCode);
-        setBillingInfo(prev => ({ ...prev, country: countryIsoCode }));
-      } catch (error) {
-        logger.error('[PaymentForm] Error detecting country:', error);
-        setBillingInfo(prev => ({ ...prev, country: 'US' }));
-      }
-    };
-    detectCountry();
-  }, []);
-
-  useEffect(() => {
-    logger.info('[PaymentForm] Initializing Stripe.js promise.');
-    setStripeApiPromise(getStripeInstance());
-  }, []);
+    if (stripeApiPromise) {
+      stripeApiPromise.catch(err => {
+        setStripeError('Could not connect to payment processor. Please check the configuration and try again.');
+      });
+    }
+  }, [stripeApiPromise]);
 
   if (stripeError) {
     return (
@@ -1122,21 +1308,9 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
         borderRadius: '6px',
         border: '1px solid #fecaca',
         padding: '20px',
-        textAlign: 'center'
+        textAlign: 'center',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", "Ubuntu", sans-serif'
       }}>
-        <div style={{
-          width: '48px',
-          height: '48px',
-          background: '#fef2f2',
-          borderRadius: '50%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          margin: '0 auto 16px',
-          color: '#dc2626'
-        }}>
-          <i className="fas fa-exclamation-triangle"></i>
-        </div>
         <h3 style={{fontSize: '16px', fontWeight: '500', color: '#32325d', marginBottom: '8px'}}>
           Payment Unavailable
         </h3>
@@ -1159,24 +1333,58 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     );
   }
 
-  if (!stripeApiPromise) {
+if (!stripeApiPromise) {
     return (
       <div style={{
         background: 'white',
         borderRadius: '6px',
         padding: '40px',
-        textAlign: 'center'
+        textAlign: 'center',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", "Ubuntu", sans-serif'
       }}>
         <div style={{
-          width: '32px',
-          height: '32px',
-          border: '3px solid #635bff',
-          borderTop: '3px solid transparent',
-          borderRadius: '50%',
-          animation: 'spin 1s linear infinite',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
           margin: '0 auto 20px'
-        }}></div>
-        <p style={{color: '#6b7c93', fontSize: '14px'}}>Loading payment form...</p>
+        }}>
+          <div style={{
+            width: '20px',
+            height: '20px',
+            background: '#635bff',
+            borderRadius: '50%',
+            animation: 'pulse 1.5s ease-in-out infinite',
+            margin: '0 3px'
+          }}></div>
+          <div style={{
+            width: '20px',
+            height: '20px',
+            background: '#635bff',
+            borderRadius: '50%',
+            animation: 'pulse 1.5s ease-in-out infinite 0.2s',
+            margin: '0 3px'
+          }}></div>
+          <div style={{
+            width: '20px',
+            height: '20px',
+            background: '#635bff',
+            borderRadius: '50%',
+            animation: 'pulse 1.5s ease-in-out infinite 0.4s',
+            margin: '0 3px'
+          }}></div>
+        </div>
+        <style jsx>{`
+          @keyframes pulse {
+            0%, 80%, 100% { 
+              transform: scale(0.8);
+              opacity: 0.5;
+            }
+            40% { 
+              transform: scale(1);
+              opacity: 1;
+            }
+          }
+        `}</style>
       </div>
     );
   }
@@ -1197,6 +1405,8 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
         productId={productId}
         productName={productName}
         quantityParam={quantity}
+        onCountryChange={onCountryChange}
+        onStateChange={onStateChange}
       />
     </Elements>
   );
