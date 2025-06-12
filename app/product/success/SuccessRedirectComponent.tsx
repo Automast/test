@@ -1,28 +1,48 @@
 // app/product/success/SuccessRedirectComponent.tsx
-'use client'; // This is where the client-side hooks and logic live
+'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react'; // Added useState to manage internal state/UI
 import { useSearchParams, useRouter } from 'next/navigation';
 
 const SuccessRedirectComponent = () => {
-  const searchParams = useSearchParams();
-  const router = useRouter();
+  const searchParams = useSearchParams(); // This hook requires a client environment
+  const router = useRouter(); // This hook requires a client environment
   const transactionId = searchParams.get('transactionId');
 
-  useEffect(() => {
-    // Redirect to the payment result page with the transactionId
-    // The payment result page will fetch the actual status based on this ID
-    // Add a small timeout to ensure the component renders before redirecting
-    const timer = setTimeout(() => {
-        router.replace(`/product/payment?transactionId=${transactionId || ''}`);
-    }, 50); // A small delay (e.g., 50ms) improves UX
+  // Optional: Use a state to explicitly show the redirecting message *after* the component loads on the client
+  const [isClientLoaded, setIsClientLoaded] = useState(false);
 
-    return () => clearTimeout(timer); // Clean up the timer
+  useEffect(() => {
+    // This effect runs only on the client after hydration
+    setIsClientLoaded(true); // Indicate client has loaded and hooks are available
+
+    if (transactionId) {
+       // Redirect to the payment result page with the transactionId
+       // The payment result page will fetch the actual status based on this ID
+       // Add a small timeout to ensure the component renders before redirecting
+       const timer = setTimeout(() => {
+           router.replace(`/product/payment?transactionId=${transactionId}`);
+       }, 50); // A small delay (e.g., 50ms) improves UX
+
+       return () => clearTimeout(timer); // Clean up the timer
+    } else {
+        // Handle case where transactionId is missing in the URL immediately on client load
+         const errorTimer = setTimeout(() => {
+             // Redirect to the payment page with an indication of error or missing ID
+             // The PaymentResultComponent should handle the 'No transaction ID provided' logic
+            router.replace(`/product/payment?error=no-transaction-id`);
+         }, 50);
+         return () => clearTimeout(errorTimer);
+    }
+
   }, [router, transactionId]); // Depend on router and transactionId
 
-  // Return the minimal loading/redirecting state while the redirect happens
+  // Render the visual loading/redirecting state *within* this client component
+  // This state is shown *after* the client component hydrates and before the redirect happens.
+  // The initial fallback defined in page.tsx is shown before this component hydrates.
   return (
     <>
+      {/* Keep styles here as they are part of this component's visual output */}
       <style jsx>{`
         @keyframes spin {
           0% { transform: rotate(0deg); }
@@ -31,7 +51,7 @@ const SuccessRedirectComponent = () => {
         
         .redirect-container {
           min-height: 100vh;
-          background-color: #f6f9fc; /* light gray-blue */
+          background-color: #f6f9fc;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -52,7 +72,7 @@ const SuccessRedirectComponent = () => {
         .redirect-spinner {
           width: 32px;
           height: 32px;
-          border: 3px solid #10b981; /* green-500 */
+          border: 3px solid #10b981;
           border-top: 3px solid transparent;
           border-radius: 50%;
           animation: spin 1s linear infinite;
@@ -60,7 +80,7 @@ const SuccessRedirectComponent = () => {
         }
         
         .redirect-text {
-          color: #32325d; /* dark purple-blue */
+          color: #32325d;
           font-size: 16px;
           font-weight: 500;
         }
@@ -68,7 +88,7 @@ const SuccessRedirectComponent = () => {
         .redirect-icon {
           width: 48px;
           height: 48px;
-          background: #10b981; /* green-500 */
+          background: #10b981;
           border-radius: 50%;
           display: flex;
           align-items: center;
@@ -77,17 +97,23 @@ const SuccessRedirectComponent = () => {
         }
       `}</style>
       
-      <div className="redirect-container">
-        <div className="redirect-card">
-          <div className="redirect-icon">
-             {/* Assuming Font Awesome is available - adjust if using a different icon library */}
-            <i className="fas fa-check" style={{color: 'white', fontSize: '20px'}}></i>
+      {/* Only show the detailed UI if client has loaded and transactionId is potentially available */}
+      {isClientLoaded && (
+          <div className="redirect-container">
+            <div className="redirect-card">
+              <div className="redirect-icon">
+                <i className="fas fa-check" style={{color: 'white', fontSize: '20px'}}></i>
+              </div>
+              <div className="redirect-spinner"></div>
+              {/* Show a message indicating the action */}
+              <div className="redirect-text">
+                 {transactionId ? 'Redirecting to payment summary...' : 'Processing...'}
+              </div>
+            </div>
           </div>
-          {/* Keep the spinner as a visual indicator */}
-          <div className="redirect-spinner"></div>
-          <div className="redirect-text">Redirecting to payment summary...</div>
-        </div>
-      </div>
+      )}
+       {/* You could optionally render a different minimal state here if !isClientLoaded,
+           but the Suspense fallback in page.tsx handles the initial state */}
     </>
   );
 };
