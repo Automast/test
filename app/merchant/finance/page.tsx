@@ -391,11 +391,17 @@ const formatCurrency = (amount: number, currency: string) => {
     return userCountry === 'BR' ? ['BRL', 'USD'] : ['USD', 'BRL'];
   };
 
-  // Filter accounts by current currency
+  // Filter accounts - allow cross-currency withdrawals
   const getAvailableAccounts = () => {
     return payoutAccounts.filter(account => {
-      if (account.type === 'crypto') return true; // Crypto always available
-      return account.currency === currentCurrency;
+      // Crypto is always available (supports USD/BRL to USDT conversion)
+      if (account.type === 'crypto') return true;
+      
+      // Bank accounts are always available for cross-currency withdrawals
+      // The backend handles USD->BRL and BRL->USD conversions via exchange rates
+      if (account.type === 'bank') return true;
+      
+      return false;
     });
   };
 
