@@ -764,6 +764,20 @@ const AccountsPage = () => {
                 </p>
               </div>
 
+                            {/* Wallet Address */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Wallet Address <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Enter wallet address"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  value={cryptoAddress}
+                  onChange={(e) => setCryptoAddress(e.target.value)}
+                />
+              </div>
+
               {/* Confirm Wallet Address */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
