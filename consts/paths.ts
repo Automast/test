@@ -28,7 +28,6 @@ export const transactionsUrl = `/finance/transactions`;
 export const transactionDetailUrl = `/finance/transactions`;
 
 // products
-// products
 export const productsUrl = `/products`;
 export const productDetailUrl = `/products`;
 export const productPublicUrl = `/products/public`;
@@ -37,10 +36,16 @@ export const productUpdateStatusUrl = `/products/:id/status`;
 // integrations
 export const webhooksUrl = `/webhooks`;
 
-// finance (payouts, etc.)
-export const payoutsUrl = `/payouts`;
-export const payoutDetailUrl = `/payouts`;
-export const payoutAccountsUrl = `/payouts/accounts`;
+// finance (updated for new withdrawal system)
+export const payoutsUrl = `/finance/withdrawals`;
+export const payoutDetailUrl = `/finance/withdrawals`;
+export const payoutAccountsUrl = `/finance/accounts`;
+export const withdrawUrl = `/finance/withdraw`;
+export const balanceUrl = `/finance/balance`;
+
+// withdrawal config (admin endpoints - may not be directly used in merchant frontend)
+export const withdrawConfigUrl = `/admin/withdraw/config`;
+export const adminWithdrawalsUrl = `/admin/withdrawals`;
 
 // settings
 export const tfaStatusUrl = `/settings/tfa/status`;
