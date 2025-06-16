@@ -731,12 +731,7 @@ try {
                     <span className="text-gray-500 text-sm font-medium">{currentCurrency}</span>
                   </div>
                 </div>
-                {withdrawLimits && (
-                  <p className="mt-1 text-xs text-gray-500">
-                    Min: {formatCurrency(withdrawLimits.min[currentCurrency], currentCurrency)} • 
-                    Daily Max: {formatCurrency(withdrawLimits.maxDaily[currentCurrency], currentCurrency)}
-                  </p>
-                )}
+ 
               </div>
 
 {/* Exchange Rate Info */}
