@@ -1,12 +1,10 @@
+// app/merchant/finance/accounts/page.tsx
 'use client';
 
 import { DashLayout } from '@/components/layouts';
-import { payoutAccountsUrl } from '@/consts/paths';
 import Toaster from '@/helpers/Toaster';
 import { useApiRequest } from '@/hooks';
-import { accountsMock } from '@/mock';
-import { Account } from '@/types';
-import { ChevronDownIcon, PencilLine, PlusIcon } from 'lucide-react';
+import { ChevronDownIcon, PencilLine, PlusIcon, CheckCircle, AlertCircle, Copy, Eye, EyeOff } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import bankIcon from '@/assets/images/icons/bank.svg';
@@ -14,30 +12,74 @@ import cryptoIcon from '@/assets/images/icons/crypto.svg';
 import Image from 'next/image';
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react';
 
+interface Account {
+  id: string;
+  type: 'bank' | 'crypto';
+  holder: string;
+  address: string;
+  where: string;
+  isActive: boolean;
+  updatedAt: Date;
+  currency?: string;
+  bankDetails?: {
+    bankName: string;
+    accountNumber: string;
+    routingNumber?: string;
+    branch?: string;
+  };
+  cryptoDetails?: {
+    asset: 'USDT' | 'USDC';
+    network: string;
+    address: string;
+  };
+}
+
+const cryptoNetworks = [
+  { value: 'bep20-usdt', label: 'BEP20 - USDT', asset: 'USDT', network: 'BEP20' },
+  { value: 'erc20-usdt', label: 'ERC20 - USDT', asset: 'USDT', network: 'ERC20' },
+  { value: 'trc20-usdt', label: 'TRC20 - USDT', asset: 'USDT', network: 'TRC20' },
+  { value: 'solana-usdc', label: 'Solana - USDC', asset: 'USDC', network: 'SOLANA' },
+];
+
+const bankCountries = [
+  { value: 'US', label: 'United States', currency: 'USD' },
+  { value: 'BR', label: 'Brazil', currency: 'BRL' },
+];
+
 const AccountsPage = () => {
   const [typeFilter, setTypeFilter] = useState<'bank' | 'crypto'>('bank');
-  const [accountData, setAccountData] = useState<Account[]>([] as Account[]);
+  const [accountData, setAccountData] = useState<Account[]>([]);
   const [showBankModal, setShowBankModal] = useState(false);
   const [showCryptoModal, setShowCryptoModal] = useState(false);
-  const [currentBank, setCurrentBank] = useState<{
-    id?: string;
-  }>({});
+  const [currentBank, setCurrentBank] = useState<{ id?: string }>({});
   const [currentCrypto, setCurrentCrypto] = useState<{ id?: string }>({});
+  const [userCountry, setUserCountry] = useState('');
+  const [showAccountNumber, setShowAccountNumber] = useState(false);
 
-  const [currency, setCurrency] = useState('');
-  const [country, setCountry] = useState('');
-  const [accNum, setAccNum] = useState('');
-  const [iban, setIban] = useState('');
-  const [accNumConf, setAccNumConf] = useState('');
-  const [swift, setSwift] = useState('');
-  const [routing, setRouting] = useState('');
-  const [isPolicy, setPolicy] = useState(false);
+  // Bank form fields
+  const [bankCountry, setBankCountry] = useState('');
+  const [bankName, setBankName] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [accountNumberConf, setAccountNumberConf] = useState('');
+  const [routingNumber, setRoutingNumber] = useState('');
+  const [branch, setBranch] = useState('');
+  const [isBankPolicy, setIsBankPolicy] = useState(false);
 
-  const [crAccount, setCrAccount] = useState('');
-  const [crChannel, setCrChannel] = useState('');
-  const [crAddress, setCrAddress] = useState('');
-  const [crAddressConf, setCrAddressConf] = useState('');
-  const [isCrPolicy, setCrPolicy] = useState(false);
+  // Crypto form fields
+  const [cryptoNetwork, setCryptoNetwork] = useState('');
+  const [cryptoAddress, setCryptoAddress] = useState('');
+  const [cryptoAddressConf, setCryptoAddressConf] = useState('');
+  const [isCryptoPolicy, setIsCryptoPolicy] = useState(false);
+
+  // API requests
+  const {
+    response: userResponse,
+    sendRequest: sendUserRequest,
+  } = useApiRequest({
+    endpoint: '/auth/me',
+    method: 'GET',
+    auth: true,
+  });
 
   const {
     response: accountsResponse,
@@ -45,525 +87,749 @@ const AccountsPage = () => {
     loading: accountsLoading,
     sendRequest: sendAccountsRequest,
   } = useApiRequest({
-    endpoint: payoutAccountsUrl,
-    headers: {
-      Accept: 'application/json',
-      Authorization: `Bearer 124567890`, // this needs to be changed with the local storage key
-    },
+    endpoint: '/finance/accounts',
     method: 'GET',
-    params: {
-      type: typeFilter,
-    },
+    auth: true,
   });
 
+  const {
+    loading: savingBank,
+    sendRequest: sendBankRequest,
+  } = useApiRequest({
+    endpoint: '/finance/accounts/bank',
+    method: 'POST',
+    auth: true,
+  });
+
+  const {
+    loading: savingCrypto,
+    sendRequest: sendCryptoRequest,
+  } = useApiRequest({
+    endpoint: '/finance/accounts/crypto',
+    method: 'POST',
+    auth: true,
+  });
+
+  // Fetch user and accounts data
   useEffect(() => {
-    if (accountsResponse) {
-      // Handle the response data here
-      setAccountData(accountsResponse.data); // this should be changed according to the response structure, this is the real code
+    sendUserRequest();
+    sendAccountsRequest();
+  }, []);
+
+  // Set user country
+  useEffect(() => {
+    if (userResponse && userResponse.success) {
+      const country = userResponse.data.merchant.country;
+      setUserCountry(country);
+      setBankCountry(country);
     }
-  }, [accountsResponse]);
+  }, [userResponse]);
+
+  // Process accounts response
+  useEffect(() => {
+    if (accountsResponse && accountsResponse.success) {
+      const accounts: Account[] = [];
+      
+      if (accountsResponse.data.bank) {
+        const bank = accountsResponse.data.bank;
+        accounts.push({
+          id: bank.id,
+          type: 'bank',
+          holder: userResponse?.data?.merchant?.businessName || 'Business Account',
+          address: bank.accountNumber,
+          where: bank.bankName,
+          isActive: true,
+          updatedAt: new Date(bank.updatedAt || Date.now()),
+          currency: bank.currency,
+          bankDetails: bank,
+        });
+      }
+
+      if (accountsResponse.data.crypto) {
+        const crypto = accountsResponse.data.crypto;
+        accounts.push({
+          id: crypto.id,
+          type: 'crypto',
+          holder: userResponse?.data?.merchant?.businessName || 'Crypto Wallet',
+          address: crypto.address,
+          where: `${crypto.asset} - ${crypto.network}`,
+          isActive: crypto.isActive,
+          updatedAt: new Date(crypto.updatedAt || Date.now()),
+          cryptoDetails: {
+            asset: crypto.asset,
+            network: crypto.network,
+            address: crypto.address,
+          },
+        });
+      }
+
+      setAccountData(accounts);
+    }
+  }, [accountsResponse, userResponse]);
 
   useEffect(() => {
     if (accountsError) {
-      Toaster.error(accountsError?.message);
-
-      // mock data instead: remove this code in production mode
-      setAccountData(accountsMock);
+      Toaster.error(accountsError?.message || 'Failed to load accounts');
     }
   }, [accountsError]);
 
+  // Reset forms when modals close
   useEffect(() => {
     if (!showBankModal) {
-      setCurrency('');
-      setCountry('');
-      setAccNum('');
-      setAccNumConf('');
-      setIban('');
-      setSwift('');
-      setRouting('');
-      setPolicy(false);
+      setBankName('');
+      setAccountNumber('');
+      setAccountNumberConf('');
+      setRoutingNumber('');
+      setBranch('');
+      setIsBankPolicy(false);
     }
   }, [showBankModal]);
 
   useEffect(() => {
     if (!showCryptoModal) {
-      setCrAccount('');
-      setCrChannel('');
-      setCrAddress('');
-      setCrAddressConf('');
-      setCrPolicy(false);
+      setCryptoNetwork('');
+      setCryptoAddress('');
+      setCryptoAddressConf('');
+      setIsCryptoPolicy(false);
     }
   }, [showCryptoModal]);
 
-  useEffect(() => {
-    sendAccountsRequest();
-  }, [typeFilter]);
+  // Check if user already has accounts
+  const hasBank = accountData.some(a => a.type === 'bank' && a.isActive);
+  const hasCrypto = accountData.some(a => a.type === 'crypto' && a.isActive);
+
+  // Get available countries based on user's location
+  const getAvailableBankCountries = () => {
+    if (userCountry === 'BR') {
+      return bankCountries.filter(c => c.value === 'BR');
+    }
+    return bankCountries.filter(c => c.value === 'US');
+  };
+
+  // Validate bank form
+  const validateBankForm = () => {
+    if (!bankName.trim()) return 'Bank name is required';
+    if (!accountNumber.trim()) return 'Account number is required';
+    if (accountNumber !== accountNumberConf) return 'Account numbers do not match';
+    if (bankCountry === 'US' && !routingNumber.trim()) return 'Routing number is required for US banks';
+    if (bankCountry === 'BR' && !branch.trim()) return 'Branch is required for Brazilian banks';
+    if (!isBankPolicy) return 'Please accept the terms';
+    return null;
+  };
+
+  // Validate crypto form
+  const validateCryptoForm = () => {
+    if (!cryptoNetwork) return 'Please select a crypto network';
+    if (!cryptoAddress.trim()) return 'Wallet address is required';
+    if (cryptoAddress !== cryptoAddressConf) return 'Wallet addresses do not match';
+    if (!isCryptoPolicy) return 'Please accept the terms';
+    return null;
+  };
+
+  // Handle bank save
+  const handleBankSave = async () => {
+    const validation = validateBankForm();
+    if (validation) {
+      Toaster.error(validation);
+      return;
+    }
+
+    try {
+      const bankData = {
+        bankName,
+        accountNumber,
+        routingNumber: bankCountry === 'US' ? routingNumber : undefined,
+        branch: bankCountry === 'BR' ? branch : undefined,
+        country: bankCountry,
+      };
+
+      await sendBankRequest('', bankData);
+      setShowBankModal(false);
+      Toaster.success('Bank account saved successfully');
+      sendAccountsRequest(); // Refresh accounts
+    } catch (error: any) {
+      Toaster.error(error.message || 'Failed to save bank account');
+    }
+  };
+
+  // Handle crypto save
+  const handleCryptoSave = async () => {
+    const validation = validateCryptoForm();
+    if (validation) {
+      Toaster.error(validation);
+      return;
+    }
+
+    try {
+      const selectedNetwork = cryptoNetworks.find(n => n.value === cryptoNetwork);
+      if (!selectedNetwork) return;
+
+      const cryptoData = {
+        asset: selectedNetwork.asset,
+        network: selectedNetwork.network,
+        address: cryptoAddress,
+      };
+
+      await sendCryptoRequest('', cryptoData);
+      setShowCryptoModal(false);
+      Toaster.success('Crypto wallet saved successfully');
+      sendAccountsRequest(); // Refresh accounts
+    } catch (error: any) {
+      Toaster.error(error.message || 'Failed to save crypto wallet');
+    }
+  };
+
+  // Copy to clipboard
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    Toaster.success('Copied to clipboard');
+  };
+
+  // Mask account number
+  const maskAccountNumber = (accountNumber: string) => {
+    if (accountNumber.length <= 4) return accountNumber;
+    return '*'.repeat(accountNumber.length - 4) + accountNumber.slice(-4);
+  };
 
   return (
     <DashLayout titleArea={<h2 className="text-xl font-semibold truncate">Manage Payout Accounts</h2>}>
-      <div className="p-4 bg-white rounded-lg">
-        <div className="flex items-center justify-between border-b border-b-gray-200 pb-2 mb-3 mx-2">
-          <div className="flex space-x-4 text-sm font-medium text-gray-900">
-            <div
-              className={`${
-                typeFilter === 'bank' ? 'text-blue-500' : 'cursor-pointer hover:text-gray-500'
-              } transition-colors duration-200 ease-in-out truncate`}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-gray-200 p-6">
+          <div className="flex space-x-6">
+            <button
+              className={`text-sm font-medium pb-2 border-b-2 transition-colors ${
+                typeFilter === 'bank'
+                  ? 'text-blue-600 border-blue-600'
+                  : 'text-gray-500 border-transparent hover:text-gray-700'
+              }`}
               onClick={() => setTypeFilter('bank')}
             >
               Bank Accounts
-            </div>
-            <div
-              className={`${
-                typeFilter === 'crypto' ? 'text-blue-500' : 'cursor-pointer hover:text-gray-500'
-              } transition-colors duration-200 ease-in-out truncate`}
+            </button>
+            <button
+              className={`text-sm font-medium pb-2 border-b-2 transition-colors ${
+                typeFilter === 'crypto'
+                  ? 'text-blue-600 border-blue-600'
+                  : 'text-gray-500 border-transparent hover:text-gray-700'
+              }`}
               onClick={() => setTypeFilter('crypto')}
             >
               Crypto Wallets
-            </div>
+            </button>
           </div>
+
+          {/* Add Account Button */}
           {typeFilter === 'bank' && (
             <button
-              className="flex items-center gap-2 hover:bg-blue-600 text-white px-3 py-2 ml-2 text-sm rounded-md cursor-pointer transition-colors duration-200 ease-in-out hover:bg-blue-400 truncate"
+              disabled={hasBank}
+              className={`flex items-center gap-2 px-4 py-2 text-sm rounded-lg font-medium transition-all ${
+                hasBank
+                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  : 'bg-blue-500 text-white hover:bg-blue-600 shadow-sm hover:shadow-md'
+              }`}
               onClick={() => {
+                if (hasBank) return;
                 setCurrentBank({});
                 setShowBankModal(true);
               }}
             >
               <PlusIcon className="w-4 h-4" />
-              Add New Bank Account
+              {hasBank ? 'Bank account already added' : 'Add Bank Account'}
             </button>
           )}
+
           {typeFilter === 'crypto' && (
             <button
-              className="flex items-center gap-2 hover:bg-blue-600 text-white px-3 py-2 ml-2 text-sm rounded-md cursor-pointer transition-colors duration-200 ease-in-out hover:bg-blue-400 truncate"
-              onClick={() => setShowCryptoModal(true)}
+              disabled={hasCrypto}
+              className={`flex items-center gap-2 px-4 py-2 text-sm rounded-lg font-medium transition-all ${
+                hasCrypto
+                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  : 'bg-blue-500 text-white hover:bg-blue-600 shadow-sm hover:shadow-md'
+              }`}
+              onClick={() => {
+                if (hasCrypto) return;
+                setCurrentCrypto({});
+                setShowCryptoModal(true);
+              }}
             >
               <PlusIcon className="w-4 h-4" />
-              Add New Crypto Wallet
+              {hasCrypto ? 'Crypto wallet already added' : 'Add Crypto Wallet'}
             </button>
           )}
         </div>
-        {/* <div className="flex gap-4 flex-wrap mb-3 px-2 items-center justify-between">
-          {typeFilter === 'bank' && <div className="text-lg font-semibold">Payout Bank Accounts</div>}
-          {typeFilter === 'crypto' && <div className="text-lg font-semibold">Payout Crypto Wallets</div>}
-        </div> */}
-        <div className="h-12 bg-gray-100 -mx-6" style={{ width: 'calc(100% + var(--spacing) * 12)' }} />
 
-        <div className="max-w-full overflow-auto -mt-12">
-          <table className="table-auto w-full mb-16">
-            <thead className="bg-gray-100 text-xs font-semibold text-gray-700 mb-2">
-              <tr className="h-12">
-                <th className="p-2 text-left">Account Holder</th>
-                <th className="p-2 text-left">
-                  {typeFilter === 'bank' && 'Account Number'}
-                  {typeFilter === 'crypto' && 'Wallet Address'}
+        {/* Accounts Table */}
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Account Details
                 </th>
-                <th className="p-2 text-left">
-                  {typeFilter === 'bank' && 'Bank Name'}
-                  {typeFilter === 'crypto' && 'Crypto Channel'}
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  {typeFilter === 'bank' ? 'Account Number' : 'Wallet Address'}
                 </th>
-                <th className="p-2 text-left">Status</th>
-                <th className="p-2 text-left">Updated On</th>
-                <th className="p-2 text-left"></th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  {typeFilter === 'bank' ? 'Bank' : 'Network'}
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Status
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Updated
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Actions
+                </th>
               </tr>
             </thead>
-            <tbody className="text-sm">
+            <tbody className="bg-white divide-y divide-gray-200">
               {accountsLoading && (
                 <tr>
-                  <td colSpan={8} className="text-center p-6">
-                    {typeFilter === 'bank' && 'Loading Bank Accounts...'}
-                    {typeFilter === 'crypto' && 'Loading Wallet Addresses...'}
+                  <td colSpan={6} className="px-6 py-8 text-center">
+                    <div className="flex items-center justify-center space-x-2">
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500"></div>
+                      <span className="text-gray-500">Loading accounts...</span>
+                    </div>
                   </td>
                 </tr>
               )}
+
               {!accountsLoading &&
-                accountData?.length > 0 &&
-                accountData?.map((t, i) => (
-                  <tr key={i} className="h-10">
-                    <td className="p-2 whitespace-nowrap border-b border-b-gray-200 min-w-30">
-                      <div className="flex items-center gap-2">
-                        <Image src={typeFilter === 'bank' ? bankIcon : cryptoIcon} alt="icon" className="w-8 h-8" />
-                        {t.holder}
+                accountData
+                  .filter(account => account.type === typeFilter)
+                  .map((account, i) => (
+                    <tr key={account.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center space-x-3">
+                          <div className="flex-shrink-0">
+                            <Image
+                              src={typeFilter === 'bank' ? bankIcon : cryptoIcon}
+                              alt="icon"
+                              className="w-10 h-10"
+                            />
+                          </div>
+                          <div>
+                            <div className="text-sm font-medium text-gray-900">{account.holder}</div>
+                            {account.currency && (
+                              <div className="text-sm text-gray-500">{account.currency}</div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-sm font-mono">
+                            {typeFilter === 'bank'
+                              ? showAccountNumber
+                                ? account.address
+                                : maskAccountNumber(account.address)
+                              : `${account.address.slice(0, 6)}...${account.address.slice(-4)}`}
+                          </span>
+                          {typeFilter === 'bank' && (
+                            <button
+                              onClick={() => setShowAccountNumber(!showAccountNumber)}
+                              className="text-gray-400 hover:text-gray-600"
+                            >
+                              {showAccountNumber ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                          )}
+                          <button
+                            onClick={() => copyToClipboard(account.address)}
+                            className="text-gray-400 hover:text-gray-600"
+                          >
+                            <Copy className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {account.where}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span
+                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                            account.isActive
+                              ? 'bg-green-100 text-green-800 border border-green-200'
+                              : 'bg-gray-100 text-gray-800 border border-gray-200'
+                          }`}
+                        >
+                          {account.isActive ? (
+                            <>
+                              <CheckCircle className="w-3 h-3 mr-1" />
+                              Active
+                            </>
+                          ) : (
+                            <>
+                              <AlertCircle className="w-3 h-3 mr-1" />
+                              Inactive
+                            </>
+                          )}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {account.updatedAt.toLocaleDateString('en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <button
+                          className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors"
+                          onClick={() => {
+                            if (typeFilter === 'bank') {
+                              setCurrentBank({ id: account.id });
+                              // Pre-fill form with existing data
+                              if (account.bankDetails) {
+                                setBankName(account.bankDetails.bankName);
+                                setAccountNumber(account.bankDetails.accountNumber);
+                                setAccountNumberConf(account.bankDetails.accountNumber);
+                                setRoutingNumber(account.bankDetails.routingNumber || '');
+                                setBranch(account.bankDetails.branch || '');
+                              }
+                              setShowBankModal(true);
+                            } else {
+                              setCurrentCrypto({ id: account.id });
+                              // Pre-fill form with existing data
+                              if (account.cryptoDetails) {
+                                setCryptoNetwork(`${account.cryptoDetails.network.toLowerCase()}-${account.cryptoDetails.asset.toLowerCase()}`);
+                                setCryptoAddress(account.cryptoDetails.address);
+                                setCryptoAddressConf(account.cryptoDetails.address);
+                              }
+                              setShowCryptoModal(true);
+                            }
+                          }}
+                        >
+                          <PencilLine className="w-4 h-4 text-gray-600" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+
+              {!accountsLoading &&
+                accountData.filter(account => account.type === typeFilter).length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-6 py-8 text-center">
+                      <div className="flex flex-col items-center space-y-3">
+                        <Image
+                          src={typeFilter === 'bank' ? bankIcon : cryptoIcon}
+                          alt="No accounts"
+                          className="w-12 h-12 opacity-30"
+                        />
+                        <div className="text-gray-500">
+                          No {typeFilter === 'bank' ? 'bank accounts' : 'crypto wallets'} added yet
+                        </div>
+                        <button
+                          onClick={() => {
+                            if (typeFilter === 'bank') {
+                              setCurrentBank({});
+                              setShowBankModal(true);
+                            } else {
+                              setCurrentCrypto({});
+                              setShowCryptoModal(true);
+                            }
+                          }}
+                          className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+                        >
+                          Add your first {typeFilter === 'bank' ? 'bank account' : 'crypto wallet'}
+                        </button>
                       </div>
                     </td>
-                    <td className="p-2 whitespace-nowrap border-b border-b-gray-200">{t.address}</td>
-                    <td className="p-2 whitespace-nowrap border-b border-b-gray-200">{t.where}</td>
-                    <td className="p-2 border-b border-b-gray-200">
-                      <span
-                        className={`px-3 py-1 text-xs font-medium rounded-full text-gray-600 ${
-                          t.isActive ? 'bg-[#CBFCCB]' : 'bg-gray-200'
-                        }`}
-                      >
-                        {t.isActive ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                    <td className="p-2 whitespace-nowrap border-b border-b-gray-200">
-                      {t.updatedAt.toLocaleString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric',
-                      })}
-                    </td>
-                    <td className="p-2 text-gray-500 border-b border-b-gray-200">
-                      <button
-                        className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition cursor-pointer"
-                        onClick={() => {
-                          if (typeFilter === 'bank') {
-                            setCurrentBank({ id: t.id });
-                            setShowBankModal(true);
-                          } else {
-                            setCurrentCrypto({ id: t.id });
-                            setShowCryptoModal(true);
-                          }
-                        }}
-                      >
-                        <PencilLine
-                          fill="gray"
-                          className="w-4 h-4 text-gray-700 hover:text-gray-500 cursor-pointer transition"
-                        />
-                      </button>
-                    </td>
                   </tr>
-                ))}
-              {!accountsLoading && accountData?.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="text-center p-6">
-                    {typeFilter === 'bank' && 'No Bank Accounts'}
-                    {typeFilter === 'crypto' && 'No Crypto Wallets'}
-                  </td>
-                </tr>
-              )}
+                )}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* Bank Modal */}
       {showBankModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#0008]"
-          onClick={() => setShowBankModal(false)}
-        >
-          <div
-            className="bg-white p-6 rounded-lg w-full max-w-xl space-y-4"
-            onClick={(e) => {
-              e.stopPropagation();
-            }}
-          >
-            <div className="flex justify-between items-center border-b border-gray-200 pb-4">
-              <h2 className="text-lg font-semibold">
-                {currentBank?.id ? 'Edit Bank Details' : 'Add New Bank Details'}
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="bg-white rounded-xl w-full max-w-2xl mx-auto shadow-2xl max-h-[95vh] flex flex-col">
+            <div className="flex justify-between items-center border-b border-gray-200 p-6 flex-shrink-0">
+              <h2 className="text-xl font-semibold text-gray-900">
+                {currentBank?.id ? 'Edit Bank Account' : 'Add Bank Account'}
               </h2>
-              <span
-                className="flex items-center justify-center w-6 h-6 rounded-full text-2xl hover:bg-gray-100 transition-colors duration-200 ease-in-out cursor-pointer"
+              <button
+                className="flex items-center justify-center w-8 h-8 rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
                 onClick={() => setShowBankModal(false)}
               >
-                &times;
-              </span>
+                ×
+              </button>
             </div>
-            <div className="max-w-xl w-full space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm mb-1">Currency</label>
-                  <div className="w-full">
-                    <Listbox value={currency} onChange={setCurrency}>
-                      <div className="relative">
-                        <ListboxButton className="w-full border border-gray-200 rounded-md px-4 py-2 text-sm text-gray-500 bg-white flex justify-between items-center focus:outline-none focus:ring-2 focus:ring-blue-500">
-                          {currency?.toUpperCase() || 'Please select'}
-                          <ChevronDownIcon className="w-4 h-4 text-gray-400" />
-                        </ListboxButton>
-                        <ListboxOptions className="absolute mt-1 max-h-60 w-full overflow-auto rounded-md bg-white py-1 text-sm shadow-lg ring-1 ring-gray-300 focus:outline-none z-10">
-                          <ListboxOption
-                            value="usd"
-                            className={({ active }) =>
-                              `cursor-pointer select-none px-4 py-2 ${
-                                active ? 'bg-blue-100 text-blue-900' : 'text-gray-900'
-                              }`
-                            }
-                          >
-                            USD
-                          </ListboxOption>
-                          <ListboxOption
-                            value="euro"
-                            className={({ active }) =>
-                              `cursor-pointer select-none px-4 py-2 ${
-                                active ? 'bg-blue-100 text-blue-900' : 'text-gray-900'
-                              }`
-                            }
-                          >
-                            EURO
-                          </ListboxOption>
-                        </ListboxOptions>
-                      </div>
-                    </Listbox>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm mb-1">Country of Bank Account</label>
-                  <div className="w-full">
-                    <Listbox value={country} onChange={setCountry}>
-                      <div className="relative">
-                        <ListboxButton className="w-full border border-gray-200 rounded-md px-4 py-2 text-sm text-gray-500 bg-white flex justify-between items-center focus:outline-none focus:ring-2 focus:ring-blue-500">
-                          {country || 'Please select'}
-                          <ChevronDownIcon className="w-4 h-4 text-gray-400" />
-                        </ListboxButton>
-                        <ListboxOptions className="absolute mt-1 max-h-60 w-full overflow-auto rounded-md bg-white py-1 text-sm shadow-lg ring-1 ring-gray-300 focus:outline-none z-10">
-                          <ListboxOption
-                            value="USA"
-                            className={({ active }) =>
-                              `cursor-pointer select-none px-4 py-2 ${
-                                active ? 'bg-blue-100 text-blue-900' : 'text-gray-900'
-                              }`
-                            }
-                          >
-                            United States
-                          </ListboxOption>
-                          <ListboxOption
-                            value="UK"
-                            className={({ active }) =>
-                              `cursor-pointer select-none px-4 py-2 ${
-                                active ? 'bg-blue-100 text-blue-900' : 'text-gray-900'
-                              }`
-                            }
-                          >
-                            United Kingdom
-                          </ListboxOption>
-                        </ListboxOptions>
-                      </div>
-                    </Listbox>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm mb-1">Account Number</label>
-                  <input
-                    type="text"
-                    placeholder="Enter Account Number"
-                    className="w-full border border-gray-200 rounded-md px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={accNum}
-                    onChange={(e) => setAccNum(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm mb-1">Confirm Account Number</label>
-                  <input
-                    type="text"
-                    placeholder="Retype Account Number"
-                    className="w-full border border-gray-200 rounded-md px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={accNumConf}
-                    onChange={(e) => setAccNumConf(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm mb-1">IBAN</label>
-                  <input
-                    type="text"
-                    placeholder="Enter IBAN Number"
-                    className="w-full border border-gray-200 rounded-md px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={iban}
-                    onChange={(e) => setIban(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm mb-1">Swift Code</label>
-                  <input
-                    type="text"
-                    placeholder="Enter Swift Code"
-                    className="w-full border border-gray-200 rounded-md px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={swift}
-                    onChange={(e) => setSwift(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm mb-1">Routing Code</label>
-                  <input
-                    type="text"
-                    placeholder="Enter Routing Code"
-                    className="w-full border border-gray-200 rounded-md px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={routing}
-                    onChange={(e) => setRouting(e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="flex items-center">
-                <label className="relative flex items-center cursor-pointer">
-                  <input
-                    id="remember-me"
-                    name="remember-me"
-                    type="checkbox"
-                    checked={isPolicy}
-                    onChange={(e) => setPolicy(e.target.checked)}
-                    className="
-                      appearance-none
-                      h-4 w-4
-                      border-2 border-gray-300
-                      rounded
-                      cursor-pointer
-                      peer
-                      checked:border-black
-                      checked:bg-black"
-                  />
-                  <span
-                    className="
-                      absolute
-                      left-1/2 top-1/2
-                      -translate-x-1/2 -translate-y-1/2
-                      text-white
-                      opacity-0
-                      peer-checked:opacity-100"
-                  >
-                    <svg width="12" height="9" viewBox="0 0 12 9" fill="none">
-                      <path d="M1 4.5L4.5 8L11 1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                    </svg>
-                  </span>
+
+            <div className="p-6 space-y-6 overflow-y-auto flex-1">
+              {/* Country Selection */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Country <span className="text-red-500">*</span>
                 </label>
-                <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-900">
-                  Submitting this bank details though our platform with your concern
+                <Listbox value={bankCountry} onChange={setBankCountry}>
+                  <div className="relative">
+                    <ListboxButton className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm bg-white flex justify-between items-center focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                      {getAvailableBankCountries().find(c => c.value === bankCountry)?.label || 'Select country'}
+                      <ChevronDownIcon className="w-4 h-4 text-gray-400" />
+                    </ListboxButton>
+                    <ListboxOptions className="absolute mt-1 max-h-60 w-full overflow-auto rounded-lg bg-white py-1 text-sm shadow-lg ring-1 ring-gray-300 focus:outline-none z-10">
+                      {getAvailableBankCountries().map((country) => (
+                        <ListboxOption
+                          key={country.value}
+                          value={country.value}
+                          className={({ active }) =>
+                            `cursor-pointer select-none px-4 py-3 ${
+                              active ? 'bg-blue-50 text-blue-900' : 'text-gray-900'
+                            }`
+                          }
+                        >
+                          {country.label}
+                        </ListboxOption>
+                      ))}
+                    </ListboxOptions>
+                  </div>
+                </Listbox>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Bank Name */}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Bank Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Enter bank name"
+                    className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    value={bankName}
+                    onChange={(e) => setBankName(e.target.value)}
+                  />
+                </div>
+
+                {/* Account Number */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Account Number <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Enter account number"
+                    className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    value={accountNumber}
+                    onChange={(e) => setAccountNumber(e.target.value)}
+                  />
+                </div>
+
+                {/* Confirm Account Number */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Confirm Account Number <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Confirm account number"
+                    className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    value={accountNumberConf}
+                    onChange={(e) => setAccountNumberConf(e.target.value)}
+                  />
+                </div>
+
+                {/* US-specific fields */}
+                {bankCountry === 'US' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Routing Number <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Enter routing number"
+                      className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      value={routingNumber}
+                      onChange={(e) => setRoutingNumber(e.target.value)}
+                    />
+                  </div>
+                )}
+
+                {/* Brazil-specific fields */}
+                {bankCountry === 'BR' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Branch <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Enter branch"
+                      className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      value={branch}
+                      onChange={(e) => setBranch(e.target.value)}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Terms checkbox */}
+              <div className="flex items-start space-x-3">
+                <input
+                  id="bank-policy"
+                  type="checkbox"
+                  checked={isBankPolicy}
+                  onChange={(e) => setIsBankPolicy(e.target.checked)}
+                  className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <label htmlFor="bank-policy" className="text-sm text-gray-700">
+                  I confirm that the bank account details are accurate and I consent to submitting this information through the platform.
                 </label>
               </div>
-              <div className="flex gap-4 pt-6 justify-center">
-                <button className="bg-blue-50 text-blue-500 font-semibold w-42 py-2 rounded-md hover:bg-blue-100  transition cursor-pointer">
-                  Cancel
-                </button>
-                <button className="hover:bg-blue-600 text-white font-semibold w-42 py-2 rounded-md bg-blue-500 transition cursor-pointer">
-                  Save
-                </button>
-              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex space-x-3 p-6 border-t border-gray-200 flex-shrink-0">
+              <button
+                onClick={() => setShowBankModal(false)}
+                className="flex-1 bg-gray-100 text-gray-700 font-medium py-3 rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBankSave}
+                disabled={savingBank || !isBankPolicy}
+                className="flex-1 bg-blue-500 text-white font-medium py-3 rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {savingBank ? (
+                  <div className="flex items-center justify-center space-x-2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <span>Saving...</span>
+                  </div>
+                ) : (
+                  'Save Bank Account'
+                )}
+              </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Crypto Modal */}
       {showCryptoModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#0008]"
-          onClick={() => setShowCryptoModal(false)}
-        >
-          <div
-            className="bg-white p-6 rounded-lg w-full max-w-xl space-y-4"
-            onClick={(e) => {
-              e.stopPropagation();
-            }}
-          >
-            <div className="flex justify-between items-center border-b border-gray-200 pb-4">
-              <h2 className="text-lg font-semibold">
-                {currentCrypto?.id ? 'Edit Crypto Wallet Details' : 'Add New Crypto Wallet'}
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="bg-white rounded-xl w-full max-w-lg mx-auto shadow-2xl max-h-[95vh] flex flex-col">
+            <div className="flex justify-between items-center border-b border-gray-200 p-6 flex-shrink-0">
+              <h2 className="text-xl font-semibold text-gray-900">
+                {currentCrypto?.id ? 'Edit Crypto Wallet' : 'Add Crypto Wallet'}
               </h2>
-              <span
-                className="flex items-center justify-center w-6 h-6 rounded-full text-2xl hover:bg-gray-100 transition-colors duration-200 ease-in-out cursor-pointer"
+              <button
+                className="flex items-center justify-center w-8 h-8 rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
                 onClick={() => setShowCryptoModal(false)}
               >
-                &times;
-              </span>
+                ×
+              </button>
             </div>
-            <div className="max-w-xl w-full space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm mb-1">Account Number</label>
-                  <input
-                    type="text"
-                    placeholder="Enter Account Number"
-                    className="w-full border border-gray-200 rounded-md px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={crAccount}
-                    onChange={(e) => setCrAccount(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm mb-1">Account Number</label>
-                  <div className="w-full">
-                    <Listbox value={crChannel} onChange={setCrChannel}>
-                      <div className="relative">
-                        <ListboxButton className="w-full border border-gray-200 rounded-md px-4 py-2 text-sm text-gray-500 bg-white flex justify-between items-center focus:outline-none focus:ring-2 focus:ring-blue-500">
-                          {crChannel?.toUpperCase() || 'Please select'}
-                          <ChevronDownIcon className="w-4 h-4 text-gray-400" />
-                        </ListboxButton>
-                        <ListboxOptions className="absolute mt-1 max-h-60 w-full overflow-auto rounded-md bg-white py-1 text-sm shadow-lg ring-1 ring-gray-300 focus:outline-none z-10">
-                          <ListboxOption
-                            value="erc20-usdt"
-                            className={({ active }) =>
-                              `cursor-pointer select-none px-4 py-2 ${
-                                active ? 'bg-blue-100 text-blue-900' : 'text-gray-900'
-                              }`
-                            }
-                          >
-                            ERC20-USDT
-                          </ListboxOption>
-                          <ListboxOption
-                            value="trc20-usdt"
-                            className={({ active }) =>
-                              `cursor-pointer select-none px-4 py-2 ${
-                                active ? 'bg-blue-100 text-blue-900' : 'text-gray-900'
-                              }`
-                            }
-                          >
-                            TRC20-USDT
-                          </ListboxOption>
-                        </ListboxOptions>
-                      </div>
-                    </Listbox>
+
+            <div className="p-6 space-y-6 overflow-y-auto flex-1">
+              {/* Network Selection */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Crypto Network <span className="text-red-500">*</span>
+                </label>
+                <Listbox value={cryptoNetwork} onChange={setCryptoNetwork}>
+                  <div className="relative">
+                    <ListboxButton className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm bg-white flex justify-between items-center focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                      {cryptoNetworks.find(n => n.value === cryptoNetwork)?.label || 'Select network'}
+                      <ChevronDownIcon className="w-4 h-4 text-gray-400" />
+                    </ListboxButton>
+                    <ListboxOptions className="absolute mt-1 max-h-60 w-full overflow-auto rounded-lg bg-white py-1 text-sm shadow-lg ring-1 ring-gray-300 focus:outline-none z-10">
+                      {cryptoNetworks.map((network) => (
+                        <ListboxOption
+                          key={network.value}
+                          value={network.value}
+                          className={({ active }) =>
+                            `cursor-pointer select-none px-4 py-3 ${
+                              active ? 'bg-blue-50 text-blue-900' : 'text-gray-900'
+                            }`
+                          }
+                        >
+                          <div className="flex flex-col">
+                            <span className="font-medium">{network.label}</span>
+                            <span className="text-xs text-gray-500">
+                              {network.network} Network • {network.asset}
+                            </span>
+                          </div>
+                        </ListboxOption>
+                      ))}
+                    </ListboxOptions>
+                  </div>
+                </Listbox>
+                <p className="mt-1 text-xs text-amber-600 flex items-center space-x-1">
+                  <AlertCircle className="w-3 h-3" />
+                  <span>Gas fees may apply for crypto withdrawals</span>
+                </p>
+              </div>
+
+              {/* Confirm Wallet Address */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Confirm Wallet Address <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Confirm wallet address"
+                  className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  value={cryptoAddressConf}
+                  onChange={(e) => setCryptoAddressConf(e.target.value)}
+                />
+              </div>
+
+              {/* Warning message */}
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <div className="flex items-start space-x-2">
+                  <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                  <div className="text-sm text-yellow-800">
+                    <p className="font-medium mb-1">Important:</p>
+                    <ul className="space-y-1 text-xs">
+                      <li>• Ensure the wallet address is correct for the selected network</li>
+                      <li>• Only stable coins (USDT/USDC) are supported</li>
+                      <li>• Wrong network selection may result in permanent loss of funds</li>
+                    </ul>
                   </div>
                 </div>
-                <div>
-                  <label className="block text-sm mb-1">Wallet Address</label>
-                  <input
-                    type="text"
-                    placeholder="Enter Wallet Address"
-                    className="w-full border border-gray-200 rounded-md px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={crAddress}
-                    onChange={(e) => setCrAddress(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm mb-1">Confirm Wallet Address</label>
-                  <input
-                    type="text"
-                    placeholder="Retype Wallet Address"
-                    className="w-full border border-gray-200 rounded-md px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={crAddressConf}
-                    onChange={(e) => setCrAddressConf(e.target.value)}
-                  />
-                </div>
               </div>
-              <div className="flex items-center">
-                <label className="relative flex items-center cursor-pointer">
-                  <input
-                    id="remember-me"
-                    name="remember-me"
-                    type="checkbox"
-                    checked={isCrPolicy}
-                    onChange={(e) => setCrPolicy(e.target.checked)}
-                    className="
-                      appearance-none
-                      h-4 w-4
-                      border-2 border-gray-300
-                      rounded
-                      cursor-pointer
-                      peer
-                      checked:border-black
-                      checked:bg-black"
-                  />
-                  <span
-                    className="
-                      absolute
-                      left-1/2 top-1/2
-                      -translate-x-1/2 -translate-y-1/2
-                      text-white
-                      opacity-0
-                      peer-checked:opacity-100"
-                  >
-                    <svg width="12" height="9" viewBox="0 0 12 9" fill="none">
-                      <path d="M1 4.5L4.5 8L11 1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                    </svg>
-                  </span>
-                </label>
-                <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-900">
-                  Submitting this bank details though our platform with your concern
+
+              {/* Terms checkbox */}
+              <div className="flex items-start space-x-3">
+                <input
+                  id="crypto-policy"
+                  type="checkbox"
+                  checked={isCryptoPolicy}
+                  onChange={(e) => setIsCryptoPolicy(e.target.checked)}
+                  className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <label htmlFor="crypto-policy" className="text-sm text-gray-700">
+                  I confirm that the wallet address is correct and I understand the risks involved with crypto transactions.
                 </label>
               </div>
-              <div className="flex gap-4 pt-6 justify-center">
-                <button className="bg-blue-50 text-blue-500 font-semibold w-42 py-2 rounded-md hover:bg-blue-100  transition cursor-pointer">
-                  Cancel
-                </button>
-                <button className="hover:bg-blue-600 text-white font-semibold w-42 py-2 rounded-md bg-blue-500 transition cursor-pointer">
-                  Save
-                </button>
-              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex space-x-3 p-6 border-t border-gray-200 flex-shrink-0">
+              <button
+                onClick={() => setShowCryptoModal(false)}
+                className="flex-1 bg-gray-100 text-gray-700 font-medium py-3 rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCryptoSave}
+                disabled={savingCrypto || !isCryptoPolicy}
+                className="flex-1 bg-blue-500 text-white font-medium py-3 rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {savingCrypto ? (
+                  <div className="flex items-center justify-center space-x-2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <span>Saving...</span>
+                  </div>
+                ) : (
+                  'Save Crypto Wallet'
+                )}
+              </button>
             </div>
           </div>
         </div>
